@@ -154,7 +154,7 @@ export const MESSAGES: Catalogue = {
     'end.idle': {de: 'Zu lange ohne Eingabe.', en: 'No input for too long.'},
     'end.max': {de: 'Die längste Sitzungsdauer ist erreicht.', en: 'The longest session\'s length was reached.'},
     'end.signed-out': {de: 'Ihre Anmeldung am System ist beendet.', en: 'Your sign-in to the system ended.'},
-    'end.ended': {de: 'Auf der Seite des Addons beendet.', en: 'Ended on the addon\'s page.'},
+    'end.ended': {de: 'Von Ihnen oder einem anderen Administrator beendet.', en: 'Ended by you or another administrator.'},
     'end.addon-off': {de: 'Das Addon wurde ausgeschaltet.', en: 'The addon was switched off.'},
     'end.ssh-off': {de: 'SSH wurde ausgeschaltet.', en: 'SSH was switched off.'},
     'end.tab-closed': {de: 'Der Tab war zu lange geschlossen.', en: 'The tab was closed for too long.'},

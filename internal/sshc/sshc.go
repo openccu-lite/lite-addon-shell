@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,9 @@ type Client struct {
 	HostKeyGlobs []string
 	// Timeout bounds the connect and the handshake; 10 s by default.
 	Timeout time.Duration
+	// ProcFiles are the kernel's tables of TCP sockets, /proc/net/tcp and /proc/net/tcp6 by
+	// default (a test names its own).
+	ProcFiles []string
 }
 
 func (c *Client) timeout() time.Duration {
@@ -119,6 +123,40 @@ func algorithmsOf(keyType string) []string {
 		return []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256}
 	}
 	return []string{keyType}
+}
+
+// Listening says whether something listens on sshd's port, read from the kernel's socket tables
+// without connecting - sshd writes a log line for every connection, and the watch asks every 15
+// seconds. known is false where the tables cannot be read; the caller then probes.
+func (c *Client) Listening() (listening, known bool) {
+	_, port, err := net.SplitHostPort(c.Addr)
+	if err != nil {
+		return false, false
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return false, false
+	}
+	want := fmt.Sprintf(":%04X", n)
+	files := c.ProcFiles
+	if len(files) == 0 {
+		files = []string{"/proc/net/tcp", "/proc/net/tcp6"}
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		known = true
+		for _, line := range strings.Split(string(b), "\n") {
+			// sl local_address rem_address st ...; st 0A is LISTEN
+			fields := strings.Fields(line)
+			if len(fields) > 3 && fields[3] == "0A" && strings.HasSuffix(strings.ToUpper(fields[1]), want) {
+				return true, true
+			}
+		}
+	}
+	return false, known
 }
 
 var errProbe = errors.New("probe")

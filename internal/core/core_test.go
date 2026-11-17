@@ -316,6 +316,27 @@ func TestSSHOffAndAuthOff(t *testing.T) {
 	e.mu.Lock()
 	e.ssh = sshc.StateOn
 	e.mu.Unlock()
+	// where the kernel's socket table can be read, it is asked instead: no probe, no line in
+	// sshd's log every 15 seconds
+	listening := true
+	e.c.o.Listening = func() (bool, bool) { return listening, true }
+	e.c.o.Probe = func(context.Context) string {
+		t.Error("the watch probed although the table is readable")
+		return sshc.StateOn
+	}
+	e.open(t, sidA)
+	e.c.Tick(ctx, true)
+	if e.m.Count() != 1 {
+		t.Fatal("ended although sshd listens")
+	}
+	listening = false
+	e.c.Tick(ctx, true)
+	if e.m.Count() != 0 {
+		t.Fatal("a session outlives sshd's listener")
+	}
+	listening = true
+	e.c.o.Listening = nil
+	e.c.o.Probe = func(context.Context) string { return sshc.StateOn }
 	e.open(t, sidA)
 	e.a.authOff = true
 	e.c.Tick(ctx, true)

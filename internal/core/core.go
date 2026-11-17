@@ -35,12 +35,15 @@ type Options struct {
 	Store    *config.Store
 	Sessions *sessions.Manager
 	// Probe asks sshd what it offers (sshc.Client.Probe).
-	Probe   func(ctx context.Context) string
-	System  Asker
-	Notices Notices
-	Audit   func(format string, args ...any)
-	Log     func(format string, args ...any)
-	Now     func() time.Time
+	Probe func(ctx context.Context) string
+	// Listening says, without connecting, whether sshd listens (sshc.Client.Listening); nil or
+	// not known: the watch probes instead.
+	Listening func() (listening, known bool)
+	System    Asker
+	Notices   Notices
+	Audit     func(format string, args ...any)
+	Log       func(format string, args ...any)
+	Now       func() time.Time
 	// OnChange is called when the switch or the SSH state changed (the page's event stream).
 	OnChange func()
 	// Every is how often the web sessions and sshd are asked; 15 s by default.
@@ -160,10 +163,11 @@ func (c *Core) notice(ctx context.Context, sw config.Switch) {
 	}
 }
 
-// SSH answers what sshd offers, asked at most every 5 seconds.
+// SSH answers what sshd offers, asked at most every 2 seconds (each ask is a connection, and a
+// line in sshd's log).
 func (c *Core) SSH(ctx context.Context) string {
 	c.mu.Lock()
-	if c.ssh != "" && c.o.Now().Sub(c.sshAt) < 5*time.Second {
+	if c.ssh != "" && c.o.Now().Sub(c.sshAt) < 2*time.Second {
 		defer c.mu.Unlock()
 		return c.ssh
 	}
@@ -184,6 +188,26 @@ func (c *Core) probe(ctx context.Context) string {
 		c.o.OnChange()
 	}
 	return st
+}
+
+// sshOff says whether sshd's listener is gone: from the kernel's socket table where that can be
+// read (no connection, so no line in sshd's log every 15 seconds), else by a probe.
+func (c *Core) sshOff(ctx context.Context) bool {
+	if c.o.Listening != nil {
+		if listening, known := c.o.Listening(); known {
+			if !listening {
+				c.mu.Lock()
+				changed := c.ssh != "" && c.ssh != sshc.StateOff
+				c.ssh, c.sshAt = sshc.StateOff, c.o.Now()
+				c.mu.Unlock()
+				if changed {
+					c.o.OnChange()
+				}
+			}
+			return !listening
+		}
+	}
+	return c.probe(ctx) == sshc.StateOff
 }
 
 // Peek answers whether the system's session check leaves the idle timer alone; nil before the
@@ -215,7 +239,7 @@ func (c *Core) Tick(ctx context.Context, due bool) {
 	}
 	// SSH switched off: sshd's listener is gone; the sessions end here even where sshd left its
 	// children running
-	if c.probe(ctx) == sshc.StateOff {
+	if c.sshOff(ctx) {
 		c.o.Sessions.EndAll(sessions.ReasonSSHOff)
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -180,5 +181,41 @@ func TestConnectionLost(t *testing.T) {
 	}
 	if sh.Clean() {
 		t.Error("a lost connection is not the shell's own end")
+	}
+}
+
+// Whether sshd listens is read from the kernel's socket table, without a connection.
+func TestListening(t *testing.T) {
+	dir := t.TempDir()
+	tcp := filepath.Join(dir, "tcp")
+	header := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+	web := "   0: 00000000:A411 00000000:0000 0A 00000000:00000000 00:00000000 00000000    33        0 6855 1 0000000000000000 100 0 0 10 0\n"
+	sshd := "   1: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 6601 1 0000000000000000 100 0 0 10 0\n"
+	// an established connection from port 22 is not a listener
+	conn := "   2: 0100007F:0016 0100007F:C3A2 01 00000000:00000000 02:000A1B2C 00000000     0        0 7001 2 0000000000000000 20 4 30 10 -1\n"
+	c := &sshc.Client{Addr: "127.0.0.1:22", ProcFiles: []string{tcp, filepath.Join(dir, "tcp6")}}
+	if _, known := c.Listening(); known {
+		t.Fatal("known without any table")
+	}
+	write := func(s string) {
+		if err := os.WriteFile(tcp, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(header + web + sshd)
+	if on, known := c.Listening(); !on || !known {
+		t.Fatalf("sshd listens: %v %v", on, known)
+	}
+	write(header + web + conn)
+	if on, known := c.Listening(); on || !known {
+		t.Fatalf("only a connection: %v %v", on, known)
+	}
+	// IPv6 only
+	_ = os.WriteFile(filepath.Join(dir, "tcp6"), []byte("   0: 00000000000000000000000000000000:0016 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 6603 1 0000000000000000 100 0 0 10 0\n"), 0o644)
+	if on, known := c.Listening(); !on || !known {
+		t.Fatalf("an IPv6 listener: %v %v", on, known)
+	}
+	if on, _ := (&sshc.Client{Addr: "127.0.0.1:2222", ProcFiles: []string{tcp}}).Listening(); on {
+		t.Fatal("another port")
 	}
 }

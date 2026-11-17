@@ -251,7 +251,7 @@ test('at most two sessions at once: a third sign-in is refused, and the button s
     await endAll(page);
 });
 
-test('ended on the addon\'s page: the terminal says why, in the same bar, and offers a new session', async ({page, context}) => {
+test('ended on the addon\'s page: the terminal says so, in the same bar, and offers a new session', async ({page, context}) => {
     await ensureOn(page);
     await openShell(page);
     const live = {state: await box(page.getByTestId('bar-state')), button: await box(page.getByTestId('end-session')), bar: await box(page.getByTestId('bar'))};
@@ -259,7 +259,7 @@ test('ended on the addon\'s page: the terminal says why, in the same bar, and of
     await admin.goto('./');
     await admin.getByTestId('session').getByTestId('end').click();
     await expect(admin.getByTestId('no-sessions')).toBeVisible();
-    await expect(page.getByTestId('bar-state')).toHaveText('Session ended: Ended on the addon\'s page.');
+    await expect(page.getByTestId('bar-state')).toHaveText('Session ended: Ended by you or another administrator.');
     await expect(page.getByTestId('bar')).toHaveClass(/ended/);
     expect(await box(page.getByTestId('bar-state'))).toEqual(live.state);
     expect(await box(page.getByTestId('again'))).toEqual(live.button);
@@ -303,8 +303,11 @@ test('SSH off or keys only: the page says what to do, and open sessions end with
     await openShell(term);
     try {
         await dev(page, '/dev/sshd?mode=keys-only');
-        await page.goto('./');
-        await expect(page.getByTestId('pill-ssh')).toHaveText('Keys only');
+        // what SSH offers is asked at most every two seconds
+        await expect(async () => {
+            await page.goto('./');
+            await expect(page.getByTestId('pill-ssh')).toHaveText('Keys only', {timeout: 1000});
+        }).toPass({timeout: 8000});
         await expect(page.getByTestId('hint')).toContainText('SSH accepts keys only, so root\'s password does not work.');
         await expect(page.getByTestId('hint').getByRole('link')).toHaveAttribute('href', '/system/remote-access#ssh');
         await expect(page.getByTestId('open')).toBeDisabled();
@@ -316,9 +319,10 @@ test('SSH off or keys only: the page says what to do, and open sessions end with
     } finally {
         await dev(page, '/dev/sshd?mode=on');
     }
-    await page.waitForTimeout(5200); // the probe's answer is kept for five seconds
-    await page.reload();
-    await expect(page.getByTestId('pill-ssh')).toHaveText('On');
+    await expect(async () => {
+        await page.reload();
+        await expect(page.getByTestId('pill-ssh')).toHaveText('On', {timeout: 1000});
+    }).toPass({timeout: 8000});
 });
 
 test('a closed tab: the session ends after the grace', async ({page, context}) => {

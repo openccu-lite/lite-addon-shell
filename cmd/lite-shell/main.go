@@ -115,7 +115,7 @@ func run(o options) error {
 		OnChange: onChange,
 		Grace:    o.grace,
 	})
-	c := core.New(core.Options{AddonID: o.id, Store: store, Sessions: mgr, Probe: ssh.Probe, System: sys, Notices: notifier,
+	c := core.New(core.Options{AddonID: o.id, Store: store, Sessions: mgr, Probe: ssh.Probe, Listening: ssh.Listening, System: sys, Notices: notifier,
 		Audit: alog.Printf, Log: logf, OnChange: onChange, Every: o.every})
 
 	var wrap func(http.Handler) http.Handler

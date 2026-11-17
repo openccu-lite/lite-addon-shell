@@ -64,7 +64,15 @@
         };
         connect();
         const tick = setInterval(() => (now = Date.now()), 1000);
+        // coming back to the page (from System → Remote access, say): what SSH offers may have changed
+        const back = () => {
+            if (document.visibilityState === 'visible') void load();
+        };
+        document.addEventListener('visibilitychange', back);
+        window.addEventListener('focus', back);
         return () => {
+            document.removeEventListener('visibilitychange', back);
+            window.removeEventListener('focus', back);
             es?.close();
             clearTimeout(retry);
             clearInterval(tick);

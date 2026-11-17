@@ -355,7 +355,7 @@ func TestAgainstRealSSHD(t *testing.T) {
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
-		time.Sleep(5100 * time.Millisecond) // the state's probe is kept for five seconds
+		time.Sleep(2100 * time.Millisecond) // the state's probe is kept for two seconds
 		if code, out := s.req("GET", "api/v1/state", nil); code != 200 || out["ssh"] != "keys-only" {
 			t.Fatalf("state: %d %v", code, out["ssh"])
 		}

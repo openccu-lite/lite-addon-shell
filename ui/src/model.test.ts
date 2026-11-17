@@ -38,8 +38,8 @@ describe('why the shell is blocked', () => {
     it('names the first thing the user can change', () => {
         expect(blockReason({...base, enabled: false})).toMatch(/switched off/);
         expect(blockReason({...base, enabled: false, auth_off: true})).toMatch(/without a login/);
-        expect(blockReason({...base, blocked: 'insecure-transport', transport: 'http'})).toMatch(/HTTPS only/);
-        expect(blockReason({...base, blocked: 'tunnel-refused', transport: 'tunnel'})).toMatch(/tunnel addon/);
+        expect(blockReason({...base, blocked: 'insecure-transport'})).toMatch(/HTTPS only/);
+        expect(blockReason({...base, blocked: 'tunnel-refused'})).toMatch(/tunnel addon/);
         expect(blockReason({...base, ssh: 'off'})).toMatch(/SSH is switched off/);
         expect(blockReason({...base, ssh: 'keys-only'})).toMatch(/keys only/);
         expect(blockReason({...base, ssh: 'unknown'})).toMatch(/system's own/);
