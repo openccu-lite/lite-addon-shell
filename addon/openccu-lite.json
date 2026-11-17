@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "id": "shell",
+  "name": "Shell",
+  "description": {
+    "de": "Eine Root-Shell für das System im Browser, für den Fall, dass kein ssh-Client zur Hand ist: ein Terminal in einem eigenen Tab. Das Addon selbst ist nie root. Jede Sitzung ist eine SSH-Anmeldung am SSH-Server des Systems mit dem root-Passwort, das jedes Mal abgefragt und nirgends gespeichert wird; SSH muss dafür eingeschaltet sein. Nach der Installation ist das Addon aus; ein Administrator schaltet es für eine begrenzte Zeit ein, und die Statusseite des Systems sagt, solange es ein ist. Nur für Administratoren, nur über HTTPS, mit Zeitlimits für jede Sitzung.",
+    "en": "A root shell for the system in the browser, for when no ssh client is at hand: a terminal in a tab of its own. The addon itself is never root. Each session is an SSH sign-in to the system's own SSH server with root's password, which is asked every time and stored nowhere; SSH has to be switched on for it. The addon is off after the install; an administrator switches it on for a limited time, and the system's Status page says so while it is on. For administrators only, over HTTPS only, with time limits on every session."
+  },
+  "version": "0.1.0",
+  "homepage": "https://github.com/openccu-lite/lite-addon-shell",
+  "licence": "MIT",
+  "changelog": "https://github.com/openccu-lite/lite-addon-shell/blob/main/CHANGELOG.md",
+  "release": {
+    "github": "openccu-lite/lite-addon-shell",
+    "asset": "shell-{arch}-{version}.tar.gz"
+  },
+  "requires": {
+    "lite": "2.0.0-beta.7",
+    "architectures": ["aarch64", "x86_64"]
+  },
+  "ui": {
+    "icon": "shell/www/icon.svg",
+    "icon_dark": "shell/www/icon-dark.svg",
+    "settings_url": "/addons/shell/",
+    "session_header": true
+  },
+  "runtime": {
+    "daemon": true,
+    "needs": [],
+    "capabilities": [],
+    "ports": [],
+    "groups": [],
+    "bin": "bin",
+    "api_scopes": [],
+    "note": {
+      "de": "Läuft eingeschränkt als eigener Benutzer: kein Zusatzrecht, kein Port, kein Recht an der System-API. Das Addon ist nicht root und kann es von sich aus nicht werden. Wer es benutzt, öffnet aber eine Root-Shell: Für die Dauer einer Sitzung reicht das Addon eine SSH-Anmeldung als root am eigenen SSH-Server des Systems (127.0.0.1) durch, mit dem root-Passwort, das der Benutzer für diese Sitzung eingibt und das nicht gespeichert wird. Es verbindet sich mit nichts außerhalb des Systems. Solange es eingeschaltet ist, meldet es das auf der Statusseite. Sein Programm (lite-shell) gehört root und steht an der ssh-Eingabe im Suchpfad.",
+      "en": "Runs confined as its own user: no privilege, no port, no scope on the system's API. The addon is not root and cannot become root by itself. Whoever uses it does open a root shell: for the length of a session the addon passes on an SSH sign-in as root to the system's own SSH server (127.0.0.1), with root's password, which the user types for that session and which is not stored. It connects to nothing outside the system. While it is switched on it says so on the Status page. Its program (lite-shell) is root's and is on the search path at the ssh prompt."
+    }
+  }
+}

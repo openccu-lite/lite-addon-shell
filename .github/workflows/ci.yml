@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go (ssh client, sessions, switch, api, package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - run: go mod tidy && git diff --exit-code go.mod go.sum
+      - run: go test -race -count=1 ./...
+      - run: CGO_ENABLED=0 go build -trimpath -o /tmp/lite-shell ./cmd/lite-shell && /tmp/lite-shell -version
+
+  sshd:
+    name: sshd (end to end against a real OpenSSH sshd in docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: SHELL_DOCKER=1 go test -count=1 -v ./test/sshd/
+
+  ui:
+    name: ui (svelte-check, vitest, build, e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: ui
+      - run: npm run check
+        working-directory: ui
+      - run: npm test
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - run: npx playwright test
+        working-directory: ui
+
+  package:
+    name: packages (aarch64, x86_64)
+    runs-on: ubuntu-latest
+    needs: [go, sshd, ui]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: VERSION=0.0.0-ci scripts/build.sh
+      - run: scripts/check-package.sh dist/shell-x86_64-0.0.0-ci.tar.gz dist/shell-aarch64-0.0.0-ci.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist/
+          retention-days: 7
