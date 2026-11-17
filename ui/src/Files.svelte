@@ -733,6 +733,14 @@
         if (!file.meta.editable && file.meta.why) parts.push(t(reasonText(file.meta.why)));
         return parts.join(' ');
     });
+    const selectedDetail = $derived.by(() => {
+        if (!selectedRow) return '';
+        const e = selectedRow.entry;
+        const parts = [e.mode + ' ' + modeLetters(e.mode), e.owner + ':' + e.group];
+        if (!isFolder(e)) parts.push(sizeText(e.size));
+        parts.push(when(e.mtime));
+        return parts.join(' · ');
+    });
     const selReason = $derived(selectedRow ? reasonText(selectedRow.reason) : '');
     // inside the backups a delete is the one change there is
     const delReason = $derived(selectedRow?.reason === 'backups' && selectedRow.path !== '/usr/local/shell-backups' ? '' : selReason);
@@ -888,9 +896,7 @@
                         {/if}
                     </p>
                     <p class="sh-sel-line sh-cut sh-small sh-muted sh-num" data-testid="selection-detail">
-                        {#if selectedRow}
-                            {selectedRow.entry.mode} {modeLetters(selectedRow.entry.mode)} · {selectedRow.entry.owner}:{selectedRow.entry.group}{#if !isFolder(selectedRow.entry)} · {sizeText(selectedRow.entry.size)}{/if} · {when(selectedRow.entry.mtime)}
-                        {/if}
+                        {selectedDetail || '\u00a0'}
                     </p>
                     <div class="sh-acts">
                         {@render act('Download', 'download', () => selectedRow && download(selectedRow.path), !selectedRow ? 'Nothing selected.' : isOpenable(selectedRow.entry) ? '' : 'Only a file is downloaded.')}
@@ -913,7 +919,6 @@
                 <div class="sh-edit-tools">
                     <!-- the status keeps its box: what the last save did, or why it did not -->
                     <span class={'sh-status sh-cut ' + status.tone} title={status.text} role="status" data-testid="status">{status.text || '\u00a0'}</span>
-                    <span class="sh-spacer"></span>
                     {#if file?.compare}
                         {#if file.compare.kind === 'conflict'}
                             {@render act('Overwrite', 'compare-overwrite', overwriteFromCompare, '', 'sh-danger')}

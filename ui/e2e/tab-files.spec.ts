@@ -314,6 +314,8 @@ test('a file that changed on the system: Overwrite, Reload or Compare', async ({
     await page.getByTestId('conflict-compare').click();
     await expect(page.getByTestId('file-pill')).toHaveText('Comparing');
     await expect(page.locator('.monaco-diff-editor')).toBeVisible();
+    // side by side, as the note says, also where the editor is not wide
+    await expect(page.locator('.monaco-diff-editor .editor.original')).toBeVisible();
     await expect(page.locator('.monaco-diff-editor .editor.original')).toContainText('theirs');
     await expect(page.locator('.monaco-diff-editor .editor.modified')).toContainText('mine');
     await expect(page.getByTestId('file-note')).toHaveText('Left: the file as it is on the system now. Right: your text.');
@@ -534,7 +536,7 @@ test('properties: mode and owner of the one entry, and the backups with Compare 
     await page.getByTestId('props-group').selectOption({label: 'nogroup (65534)'});
     await page.getByTestId('props-apply').click();
     await expect(dlg).toBeHidden();
-    await expect(page.getByTestId('selection-detail')).toContainText('0640 rw-r----- · www-data:nogroup');
+    await expect(page.getByTestId('selection-detail')).toHaveText(/^0640 rw-r----- · www-data:nogroup · 15 B · \d\d:\d\d$/);
     // a save after that keeps both
     await retype(page, 'third version\n');
     await page.getByTestId('save').click();

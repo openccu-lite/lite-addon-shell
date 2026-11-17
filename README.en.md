@@ -214,8 +214,8 @@ administrator's web session, every write the header `X-CCU-Addon-Request`. Nothi
 
 A session's end reasons: `exit`, `idle`, `max`, `signed-out`, `ended`, `addon-off`, `ssh-off`, `tab-closed`,
 `connection`, `stopping`, `unverified` (the system could not be asked about the web session for two minutes),
-`stuck` (a file did not answer a read within 15 seconds - a few of the kernel's never do - and the SFTP server
-would wait on it for good).
+`stuck` (a file did not answer a read within 15 seconds, and the SFTP server would wait on it for good; the
+kernel's files known for that, `/proc/kmsg` and the trace pipes, are refused by name).
 
 Every request under `/sessions/{id}/fs/` carries the session's handle in the header `X-Shell-Handle` (never in the
 address) and comes from the web session that opened the session; anything else is `403 no-session`. Paths are

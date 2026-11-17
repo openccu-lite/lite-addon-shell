@@ -294,6 +294,33 @@ func TestReadOpensTextForEditingAndSaysWhyAFileIsNotEditable(t *testing.T) {
 	wantCode(t, err, "not-found")
 }
 
+func TestTheKernelsFilesThatNeverAnswerAreNotOpened(t *testing.T) {
+	e := newEnv(t)
+	e.put("/proc/kmsg", "would block on a system\n")
+	e.put("/sys/kernel/tracing/trace_pipe", "would block too\n")
+	e.put("/sys/kernel/tracing/per_cpu/cpu0/trace_pipe_raw", "and this\n")
+	e.put("/sys/kernel/tracing/trace", "this one answers\n")
+	opened := ""
+	e.tree.Fail = func(op, p string) error {
+		if op == "Read" || op == "Open" {
+			opened += p + " "
+		}
+		return nil
+	}
+	for _, p := range []string{"/proc/kmsg", "/sys/kernel/tracing/trace_pipe", "/sys/kernel/tracing/per_cpu/cpu0/trace_pipe_raw"} {
+		_, err := e.fs.Read(p)
+		wantCode(t, err, "special")
+		_, _, err = e.fs.Open(p)
+		wantCode(t, err, "special")
+	}
+	if opened != "" {
+		t.Fatalf("opened: %s", opened)
+	}
+	if c, err := e.fs.Read("/sys/kernel/tracing/trace"); err != nil || string(c.Data) != "this one answers\n" {
+		t.Fatalf("%+v, %v", c, err)
+	}
+}
+
 func TestAFifoIsNeverOpened(t *testing.T) {
 	e := newEnv(t)
 	if err := syscall.Mkfifo(e.real("/usr/local/pipe"), 0o644); err != nil {

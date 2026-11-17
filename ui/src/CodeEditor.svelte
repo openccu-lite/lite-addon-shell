@@ -104,7 +104,8 @@
         model.onDidChangeContent(() => setDirty(model!.getAlternativeVersionId() !== cleanVersion));
         if (original !== undefined) {
             originalModel = m.editor.createModel(original, lang);
-            diff = m.editor.createDiffEditor(host, {...options(), readOnly: true, originalEditable: false, renderSideBySide: true});
+            // side by side whatever the width: the note above says "left" and "right"
+            diff = m.editor.createDiffEditor(host, {...options(), readOnly: true, originalEditable: false, renderSideBySide: true, useInlineViewWhenSpaceIsLimited: false});
             diff.setModel({original: originalModel, modified: model});
         } else {
             editor = m.editor.create(host, {...options(), model});

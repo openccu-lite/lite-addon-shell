@@ -602,7 +602,22 @@ func (f *FS) regular(p string) (string, os.FileInfo, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	if neverAnswers(real) {
+		return "", nil, refuse("special", "%s waits for the kernel instead of answering a read, and is not opened", p)
+	}
 	return real, fi, nil
+}
+
+// neverAnswers names the files of the kernel that look like files and block a read until the
+// kernel has something to say: its message buffer and the trace pipes. OpenSSH's SFTP server
+// does one thing at a time and would wait on such a file - after the session, too, as a process
+// of root's that nothing ends. They are refused by name; any other file that does the same ends
+// its session after a while (the read's time limit), which is the net below this list.
+func neverAnswers(real string) bool {
+	if real == "/proc/kmsg" {
+		return true
+	}
+	return under(real, "/sys") && strings.HasPrefix(path.Base(real), "trace_pipe")
 }
 
 // Binary says whether data is not text: a NUL byte in its first 8 KiB, or not valid UTF-8.
