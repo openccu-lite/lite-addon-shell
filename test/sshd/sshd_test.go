@@ -9,6 +9,8 @@ package sshd
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/hobbyquaker/ccu-addon-kit/go/addonkit"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/openccu-lite/lite-addon-shell/internal/audit"
 	"github.com/openccu-lite/lite-addon-shell/internal/config"
@@ -574,6 +577,123 @@ func TestAgainstRealSSHD(t *testing.T) {
 		if strings.Contains(string(lines), "32002") || strings.Contains(string(lines), "theirs") {
 			t.Errorf("the audit holds what a file holds")
 		}
+	})
+
+	t.Run("a key for root as the system writes it: only from its address, only until its time, no forwarding", func(t *testing.T) {
+		// What the key mode stands on: openccu-lite writes an addon's key into root's authorized keys
+		// as restrict,pty,from="127.0.0.1,::1",expiry-time="<a minute ahead>Z" each time an
+		// administrator arms it. sshd is the one that holds those limits; this is what it does.
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		signer, err := ssh.NewSignerFromKey(priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+		// the address sshd sees this test come from (the bridge's gateway): "the system itself" here
+		from := run(t, "docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}", name)
+		stamp := func(d time.Duration) string { return time.Now().UTC().Add(d).Format("20060102150405") + "Z" }
+		arm := func(from, expiry string) {
+			t.Helper()
+			line := fmt.Sprintf(`restrict,pty,from="%s",expiry-time="%s" %s openccu-lite-addon:shell`, from, expiry, pub)
+			run(t, "docker", "exec", name, "sh", "-c", "mkdir -p /root/.ssh && chmod 700 /root/.ssh && cat > /root/.ssh/authorized_keys <<'EOF'\n"+line+"\nEOF\nchmod 600 /root/.ssh/authorized_keys")
+		}
+		defer run(t, "docker", "exec", name, "rm", "-f", "/root/.ssh/authorized_keys")
+
+		// not armed: there is no line
+		if _, err := s.ssh.OpenWithKey(ctx, signer, sshc.Size{}); !errors.Is(err, sshc.ErrKeyRefused) {
+			t.Fatalf("a key without a line: %v", err)
+		}
+		// armed for this address, a minute ahead: a root shell on a pty ("restrict" alone would give none)
+		arm(from, stamp(time.Minute))
+		sh, err := s.ssh.OpenWithKey(ctx, signer, sshc.Size{Cols: 100, Rows: 30})
+		if err != nil {
+			t.Fatalf("the armed key: %v", err)
+		}
+		var out bytes.Buffer
+		got := make(chan struct{})
+		go func() {
+			defer close(got)
+			buf := make([]byte, 4096)
+			for !strings.Contains(out.String(), "KEY-0-/dev/pts/") {
+				n, err := sh.Read(buf)
+				out.Write(buf[:n])
+				if err != nil {
+					return
+				}
+			}
+		}()
+		_, _ = sh.Write([]byte("echo KEY-$(id -u)-$(tty)\r"))
+		select {
+		case <-got:
+		case <-time.After(15 * time.Second):
+		}
+		sh.Close()
+		<-got
+		if !strings.Contains(out.String(), "KEY-0-/dev/pts/") {
+			t.Fatalf("no root shell on a pty with the key: %q", tail(out.String()))
+		}
+		// the files work under the same line
+		fl, err := s.ssh.OpenFilesWithKey(ctx, signer)
+		if err != nil {
+			t.Fatalf("SFTP with the armed key: %v", err)
+		}
+		if _, err := fl.SFTP.Stat("/etc/passwd"); err != nil {
+			t.Errorf("SFTP under restrict,pty: %v", err)
+		}
+		fl.Close()
+		// no forwarding through it: the key opens a shell and files on the system, not a way into its network
+		hostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(run(t, "docker", "exec", name, "cat", "/etc/ssh/ssh_host_ed25519_key.pub")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		direct, err := ssh.Dial("tcp", addr, &ssh.ClientConfig{User: "root", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			HostKeyCallback: ssh.FixedHostKey(hostKey), HostKeyAlgorithms: []string{ssh.KeyAlgoED25519}, Timeout: 10 * time.Second})
+		if err != nil {
+			t.Fatalf("a plain connection with the armed key: %v", err)
+		}
+		if c, err := direct.Dial("tcp", "127.0.0.1:22"); err == nil {
+			c.Close()
+			t.Errorf("a forwarded connection was opened through the restricted key")
+		}
+		if l, err := direct.Listen("tcp", "127.0.0.1:0"); err == nil {
+			l.Close()
+			t.Errorf("a remote forward was granted to the restricted key")
+		}
+		direct.Close()
+		// its time is up: refused, though the line is still there
+		arm(from, stamp(-time.Minute))
+		if _, err := s.ssh.OpenWithKey(ctx, signer, sshc.Size{}); !errors.Is(err, sshc.ErrKeyRefused) {
+			t.Fatalf("after the expiry: %v", err)
+		}
+		// for the loopback only, as the system writes it: this test comes from another address
+		arm("127.0.0.1,::1", stamp(time.Minute))
+		if _, err := s.ssh.OpenWithKey(ctx, signer, sshc.Size{}); !errors.Is(err, sshc.ErrKeyRefused) {
+			t.Fatalf("from another address than the line names: %v", err)
+		}
+		// a server that takes keys only takes this key: the key mode is what such a system gets
+		arm(from, stamp(time.Minute))
+		run(t, "docker", "exec", name, "sh", "-c", "echo 'PasswordAuthentication no' > /etc/ssh/sshd_config.d/keys.conf && kill -HUP 1")
+		defer func() {
+			run(t, "docker", "exec", name, "sh", "-c", "rm -f /etc/ssh/sshd_config.d/keys.conf && kill -HUP 1")
+			for i := 0; i < 50 && s.ssh.Probe(ctx) != sshc.StateOn; i++ {
+				time.Sleep(200 * time.Millisecond)
+			}
+		}()
+		deadline := time.Now().Add(15 * time.Second)
+		for s.ssh.Probe(ctx) != sshc.StateKeysOnly {
+			if time.Now().After(deadline) {
+				t.Fatalf("probe: %s", s.ssh.Probe(ctx))
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		sh, err = s.ssh.OpenWithKey(ctx, signer, sshc.Size{})
+		if err != nil {
+			t.Fatalf("the armed key on a server that takes keys only: %v", err)
+		}
+		sh.Close()
 	})
 
 	t.Run("keys only: the probe says so and root's password is not even tried", func(t *testing.T) {

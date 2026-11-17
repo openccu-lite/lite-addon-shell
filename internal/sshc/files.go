@@ -32,6 +32,20 @@ func (c *Client) OpenFiles(ctx context.Context, password string) (*Files, error)
 	if err != nil {
 		return nil, err
 	}
+	return files(client)
+}
+
+// OpenFilesWithKey is OpenFiles with a key instead of root's password.
+func (c *Client) OpenFilesWithKey(ctx context.Context, key ssh.Signer) (*Files, error) {
+	client, err := c.loginKey(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return files(client)
+}
+
+// files starts the SFTP subsystem on the connection, which becomes the session's own.
+func files(client *ssh.Client) (*Files, error) {
 	sc, err := sftp.NewClient(client)
 	if err != nil {
 		client.Close()

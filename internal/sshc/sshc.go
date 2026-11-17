@@ -35,6 +35,9 @@ var (
 	ErrKeysOnly      = errors.New("SSH accepts keys only")
 	ErrWrongPassword = errors.New("wrong password")
 	ErrHostKey       = errors.New("the SSH server's host key is not the system's")
+	// ErrKeyRefused is a key the server does not take: no line for it in root's authorized keys,
+	// or a line whose time is up or that is for another address.
+	ErrKeyRefused = errors.New("the SSH server refused the key")
 )
 
 // Client reaches one sshd.
@@ -242,10 +245,29 @@ func (s Size) clamp() Size {
 // ErrWrongPassword, ErrHostKey, or what the connection said.
 func (c *Client) login(ctx context.Context, password string) (*ssh.Client, error) {
 	offered := false
-	cfg, err := c.config([]ssh.AuthMethod{ssh.PasswordCallback(func() (string, error) {
+	return c.connect(ctx, ssh.PasswordCallback(func() (string, error) {
 		offered = true
 		return password, nil
-	})})
+	}), func() error {
+		if !offered {
+			return ErrKeysOnly
+		}
+		return ErrWrongPassword
+	})
+}
+
+// loginKey signs in with a key instead of a password. sshd is the one that decides whether the
+// key counts right now: the line in root's authorized keys carries the address it is for and the
+// time until which it is good. The errors are ErrOff, ErrKeyRefused, ErrHostKey, or what the
+// connection said.
+func (c *Client) loginKey(ctx context.Context, key ssh.Signer) (*ssh.Client, error) {
+	return c.connect(ctx, ssh.PublicKeys(key), func() error { return ErrKeyRefused })
+}
+
+// connect dials sshd and authenticates with the one method; refused names the error for a server
+// that did not take it.
+func (c *Client) connect(ctx context.Context, auth ssh.AuthMethod, refused func() error) (*ssh.Client, error) {
+	cfg, err := c.config([]ssh.AuthMethod{auth})
 	if err != nil {
 		return nil, err
 	}
@@ -261,10 +283,7 @@ func (c *Client) login(ctx context.Context, password string) (*ssh.Client, error
 		case errors.Is(err, ErrHostKey) || strings.Contains(err.Error(), ErrHostKey.Error()):
 			return nil, ErrHostKey
 		case strings.Contains(err.Error(), "unable to authenticate"):
-			if !offered {
-				return nil, ErrKeysOnly
-			}
-			return nil, ErrWrongPassword
+			return nil, refused()
 		}
 		return nil, err
 	}
@@ -297,6 +316,20 @@ func (c *Client) Open(ctx context.Context, password string, size Size) (*Shell, 
 	if err != nil {
 		return nil, err
 	}
+	return shell(client, size)
+}
+
+// OpenWithKey is Open with a key instead of root's password (loginKey says what decides).
+func (c *Client) OpenWithKey(ctx context.Context, key ssh.Signer, size Size) (*Shell, error) {
+	client, err := c.loginKey(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return shell(client, size)
+}
+
+// shell starts the account's shell on a pty of the connection, which becomes the shell's own.
+func shell(client *ssh.Client, size Size) (*Shell, error) {
 	sess, err := client.NewSession()
 	if err != nil {
 		client.Close()

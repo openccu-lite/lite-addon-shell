@@ -8,6 +8,7 @@
 package fakesshd
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
@@ -34,10 +35,12 @@ type Server struct {
 
 	mu       sync.Mutex
 	keysOnly bool
-	l        net.Listener
-	signer   ssh.Signer
-	conns    map[net.Conn]bool
-	logins   int
+	// authorized is the one key root's authorized keys hold, nil for none
+	authorized ssh.PublicKey
+	l          net.Listener
+	signer     ssh.Signer
+	conns      map[net.Conn]bool
+	logins     int
 }
 
 // New makes a server with a fresh ed25519 host key, not listening yet.
@@ -63,6 +66,14 @@ func (s *Server) WriteHostKey(path string) error { return os.WriteFile(path, s.H
 func (s *Server) SetKeysOnly(on bool) {
 	s.mu.Lock()
 	s.keysOnly = on
+	s.mu.Unlock()
+}
+
+// SetAuthorizedKey puts one key into root's authorized keys (nil: none), as the system does for
+// an addon's key that an administrator armed.
+func (s *Server) SetAuthorizedKey(key ssh.PublicKey) {
+	s.mu.Lock()
+	s.authorized = key
 	s.mu.Unlock()
 }
 
@@ -142,8 +153,14 @@ func (s *Server) config() *ssh.ServerConfig {
 			return nil, errors.New("wrong password")
 		}
 	}
-	// a key that never matches, so "publickey" is offered as on a real sshd
-	cfg.PublicKeyCallback = func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
+	// "publickey" is offered as on a real sshd; it takes the one authorized key, if there is one
+	cfg.PublicKeyCallback = func(c ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+		s.mu.Lock()
+		want := s.authorized
+		s.mu.Unlock()
+		if want != nil && c.User() == s.User && bytes.Equal(want.Marshal(), key.Marshal()) {
+			return nil, nil
+		}
 		return nil, errors.New("no key is authorised")
 	}
 	cfg.AddHostKey(s.signer)

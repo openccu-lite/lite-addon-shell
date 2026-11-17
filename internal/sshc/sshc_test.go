@@ -3,12 +3,16 @@ package sshc_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/openccu-lite/lite-addon-shell/internal/fakesshd"
 	"github.com/openccu-lite/lite-addon-shell/internal/sshc"
@@ -217,5 +221,56 @@ func TestListening(t *testing.T) {
 	}
 	if on, _ := (&sshc.Client{Addr: "127.0.0.1:2222", ProcFiles: []string{tcp}}).Listening(); on {
 		t.Fatal("another port")
+	}
+}
+
+func newKey(t *testing.T) ssh.Signer {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
+}
+
+// A key signs in where root's authorized keys hold it - also on a server that takes keys only -
+// and nowhere else; the refusal is its own error, not a wrong password.
+func TestAKeySignsInOnlyWhereTheServerHoldsIt(t *testing.T) {
+	srv, c := start(t)
+	ctx := context.Background()
+	key := newKey(t)
+	if _, err := c.OpenWithKey(ctx, key, sshc.Size{}); !errors.Is(err, sshc.ErrKeyRefused) {
+		t.Fatalf("a key the server does not hold: %v", err)
+	}
+	srv.SetAuthorizedKey(key.PublicKey())
+	srv.SetKeysOnly(true)
+	sh, err := c.OpenWithKey(ctx, key, sshc.Size{Cols: 90, Rows: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sh.Close()
+	readUntil(t, sh, "# ")
+	if _, err := sh.Write([]byte("id\r")); err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, sh, "uid=0(root)")
+	if _, err := c.OpenWithKey(ctx, newKey(t), sshc.Size{}); !errors.Is(err, sshc.ErrKeyRefused) {
+		t.Fatalf("another key: %v", err)
+	}
+	// the line is gone (its time was up, or it was removed on the system): refused again
+	srv.SetAuthorizedKey(nil)
+	if _, err := c.OpenWithKey(ctx, key, sshc.Size{}); !errors.Is(err, sshc.ErrKeyRefused) {
+		t.Fatalf("after the key was removed: %v", err)
+	}
+	if _, err := c.OpenFilesWithKey(ctx, key); !errors.Is(err, sshc.ErrKeyRefused) {
+		t.Fatalf("files with a removed key: %v", err)
+	}
+	srv.Kill()
+	if _, err := c.OpenWithKey(ctx, key, sshc.Size{}); !errors.Is(err, sshc.ErrOff) {
+		t.Fatalf("without sshd: %v", err)
 	}
 }
