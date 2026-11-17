@@ -11,7 +11,8 @@
 #   page), rc.d (the service script), etc/lighttpd.conf (the proxy rule).
 #
 #   The data stays: the settings live in /usr/local/etc/config/addons/shell (the limits and the
-#   switch's state; no password, no key), which neither an update nor an uninstall touches.
+#   switch's state; no password, no key). An update touches neither; an uninstall and a fresh
+#   install keep the limits and remove the switch's state: the addon is off after every install.
 #
 
 ADDON=shell
@@ -39,6 +40,12 @@ rm -f "${ADDON_DIR:?}/etc/lighttpd.conf"
 
 # the configuration's directory (0700): the system gives it to the addon's user before every start
 mkdir -p $CONF_DIR/addons/$ADDON && chmod 700 $CONF_DIR/addons/$ADDON
+
+# off after the install: a fresh install never comes up switched on, whatever an earlier
+# installation left behind (an update keeps the switch)
+if [ $EXITCODE -eq 10 ]; then
+    rm -f $CONF_DIR/addons/$ADDON/state.json
+fi
 
 mkdir -p $ADDON_DIR
 cp -af $ADDON/bin $ADDON/app $ADDON/www $ADDON/rc.d $ADDON/versions $ADDON_DIR/

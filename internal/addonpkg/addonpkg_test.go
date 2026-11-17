@@ -200,15 +200,32 @@ func TestScripts(t *testing.T) {
 		if !strings.HasPrefix(string(b), "#!/bin/sh\n") {
 			t.Errorf("%s is not a sh script", p)
 		}
+		// the limits stay; the one thing removed from the configuration is the switch's state,
+		// at the uninstall and at a fresh install: the addon is off after every install
+		offs := 0
 		for _, l := range strings.Split(string(b), "\n") {
-			if strings.Contains(l, "rm ") && strings.Contains(l, "$CONF_DIR/addons/$ADDON") && !strings.Contains(l, "www") {
-				t.Errorf("%s removes the configuration: %s", p, l)
+			if !strings.Contains(l, "rm ") || !strings.Contains(l, "$CONF_DIR/addons/$ADDON") || strings.Contains(l, "www") {
+				continue
 			}
+			if strings.TrimSpace(l) == "rm -f $CONF_DIR/addons/$ADDON/state.json" {
+				offs++
+				continue
+			}
+			t.Errorf("%s removes the configuration: %s", p, l)
+		}
+		if offs != 1 {
+			t.Errorf("%s: the switch's state must not survive an uninstall or a fresh install (%d)", p, offs)
 		}
 	}
 	rc, _ := os.ReadFile("../../addon/shell/rc.d")
 	if !strings.Contains(string(rc), "ADDON=shell\n") || !strings.Contains(string(rc), "DAEMON=$ADDON_DIR/bin/lite-shell\n") || !strings.Contains(string(rc), `DAEMON_ARGS="-addon-dir $ADDON_DIR"`) {
 		t.Error("rc.d: the addon name, the daemon or its arguments")
+	}
+	// bin/ is root's (runtime.bin): the addon's user cannot remove it, and does not try
+	for _, l := range strings.Split(string(rc), "\n") {
+		if strings.Contains(l, "rm ") && strings.Contains(l, "$ADDON_DIR/bin") {
+			t.Errorf("rc.d removes bin/: %s", l)
+		}
 	}
 	us, _ := os.ReadFile("../../addon/update_script")
 	if !strings.Contains(string(us), "$ADDON_DIR/bin/.nobackup") {

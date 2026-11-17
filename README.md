@@ -110,8 +110,9 @@ für Ihre Architektur aus den [Releases](https://github.com/openccu-lite/lite-ad
 4. Im neuen Tab: das root-Passwort, **Verbinden**.
 5. Schalten Sie das Addon aus, wenn Sie fertig sind.
 
-Eine Deinstallation entfernt das Programm; die Einstellungen bleiben für eine Neuinstallation in
-`/usr/local/etc/config/addons/shell` (zwei kleine Dateien, kein Geheimnis).
+Eine Deinstallation entfernt das Programm; die Limits bleiben für eine Neuinstallation in
+`/usr/local/etc/config/addons/shell` (eine kleine Datei, kein Geheimnis). Der Schalter bleibt nicht: Nach jeder
+Installation ist das Addon aus.
 
 ## Screenshots
 

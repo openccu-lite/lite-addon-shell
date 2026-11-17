@@ -103,8 +103,8 @@ architecture from the [releases](https://github.com/openccu-lite/lite-addon-shel
 4. In the new tab: root's password, **Connect**.
 5. Switch the addon off when you are done.
 
-An uninstall removes the program; the settings stay in `/usr/local/etc/config/addons/shell` (two small files, no
-secret) for a reinstall.
+An uninstall removes the program; the limits stay in `/usr/local/etc/config/addons/shell` (one small file, no
+secret) for a reinstall. The switch does not: after every install the addon is off.
 
 ## Screenshots
 

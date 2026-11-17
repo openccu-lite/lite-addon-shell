@@ -12,7 +12,7 @@ keeping the web session alive).
   which is asked for every session and stored nowhere. SSH has to be switched on (*System → Remote access*); the
   addon never switches it on, and *SSH off* switches the shell off. The SSH server's host key is checked against the
   system's own host key files.
-- **Off after the install.** An administrator switches it on for 1 hour, 8 hours (the default) or until it is
+- **Off after the install** - every install, a reinstall over kept settings too. An administrator switches it on for 1 hour, 8 hours (the default) or until it is
   switched off again; a dialog says what that means. While it is on, the system's Status page carries a notice.
 - **Limits:** a session ends after 15 minutes without input (output does not count), after 8 hours at the latest,
   and at most 2 sessions are open at once (all three can be set). Five wrong passwords lock the sign-in for 15

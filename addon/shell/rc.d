@@ -110,14 +110,16 @@ case "$1" in
         ;;
     uninstall)
         Stop
-        # openccu-lite runs this as the addon's user and removes the links, the proxy rule and the
-        # menu entry itself afterwards. The program goes; the settings stay in
-        # /usr/local/etc/config/addons/shell for a reinstall - remove that directory by hand to be
-        # rid of them. No password and no key is kept anywhere. Open root sessions end with the
-        # daemon, and the notice on the Status page goes with the addon.
-        rm -rf $ADDON_DIR/bin $ADDON_DIR/app $ADDON_DIR/www $ADDON_DIR/rc.d $ADDON_DIR/versions $ADDON_DIR/etc/lighttpd.conf $ADDON_DIR/var
+        # openccu-lite runs this as the addon's user and removes the links, the proxy rule, the
+        # menu entry and the tree (bin/ is root's and the system's to remove) itself afterwards.
+        # The limits stay in /usr/local/etc/config/addons/shell for a reinstall - remove that
+        # directory by hand to be rid of them. The switch does not stay: a reinstalled addon is
+        # off, as after any install. No password and no key is kept anywhere. Open root sessions
+        # end with the daemon, and the notice on the Status page goes with the addon.
+        rm -f $CONF_DIR/addons/$ADDON/state.json
+        rm -rf $ADDON_DIR/app $ADDON_DIR/www $ADDON_DIR/rc.d $ADDON_DIR/versions $ADDON_DIR/etc/lighttpd.conf $ADDON_DIR/var
         rm -f $PIDFILE
-        log info "Uninstalled $ADDON (configuration kept in $CONF_DIR/addons/$ADDON)"
+        log info "Uninstalled $ADDON (the limits kept in $CONF_DIR/addons/$ADDON, the switch off)"
         ;;
     *) exit 0 ;;
 esac

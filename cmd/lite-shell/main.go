@@ -114,6 +114,13 @@ func run(o options) error {
 		Audit:    alog.Printf,
 		OnChange: onChange,
 		Grace:    o.grace,
+		Lost: func() string {
+			// switching SSH off ends sshd's sessions at once: say that, not "connection lost"
+			if listening, known := ssh.Listening(); known && !listening {
+				return sessions.ReasonSSHOff
+			}
+			return sessions.ReasonConnection
+		},
 	})
 	c := core.New(core.Options{AddonID: o.id, Store: store, Sessions: mgr, Probe: ssh.Probe, Listening: ssh.Listening, System: sys, Notices: notifier,
 		Audit: alog.Printf, Log: logf, OnChange: onChange, Every: o.every})

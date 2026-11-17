@@ -78,6 +78,10 @@ type Options struct {
 	Now      func() time.Time
 	// Grace is how long a session without its tab lives; DefaultGrace by default.
 	Grace time.Duration
+	// Lost names the reason when a shell ended with its connection: ReasonSSHOff when sshd's
+	// listener is gone too (switching SSH off ends sshd's sessions at once), else
+	// ReasonConnection. nil: ReasonConnection.
+	Lost func() string
 }
 
 // Who opens a session: the administrator's account, the web session that owns it, the client's
@@ -359,6 +363,9 @@ func (m *Manager) Open(ctx context.Context, who Who, password string, size sshc.
 			reason := ReasonExit
 			if !shell.Clean() {
 				reason = ReasonConnection
+				if m.o.Lost != nil {
+					reason = m.o.Lost()
+				}
 			}
 			m.End(s.id, reason)
 		case <-s.done:

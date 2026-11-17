@@ -334,6 +334,15 @@ func TestEnds(t *testing.T) {
 	if r := waitGone(t, a2); r != ReasonConnection {
 		t.Fatalf("reason %q", r)
 	}
+	// a connection lost because SSH was switched off says so
+	e.m.o.Lost = func() string { return ReasonSSHOff }
+	ix, hx := e.open(alice)
+	ax, _, _ := e.m.Attach(ix.ID, hx)
+	e.shells[2].clean = false
+	e.shells[2].Close()
+	if r := waitGone(t, ax); r != ReasonSSHOff {
+		t.Fatalf("reason %q", r)
+	}
 	i3, h3 := e.open(alice)
 	i4, h4 := e.open(bob)
 	a3, _, _ := e.m.Attach(i3.ID, h3)
@@ -355,7 +364,7 @@ func TestEnds(t *testing.T) {
 	if e.m.End("nope", ReasonEnded) {
 		t.Error("ending a session that is not there")
 	}
-	if got := e.audited(); strings.Count(got, "session-open") != 4 || strings.Count(got, "session-close") != 3 {
+	if got := e.audited(); strings.Count(got, "session-open") != 5 || strings.Count(got, "session-close") != 4 {
 		t.Errorf("audit: %s", got)
 	}
 }
