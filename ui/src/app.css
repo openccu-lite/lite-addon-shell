@@ -441,3 +441,472 @@ body,
 .sh-term .xterm .xterm-viewport {
     background-color: transparent !important;
 }
+
+/* ---- the session tabs' bar: what kind of session it is, beside the title ---- */
+
+.sh-bar-kind {
+    flex: none;
+    padding: 0 8px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: var(--hmm-font-size-small);
+    opacity: 0.85;
+}
+
+/* ---- the files tab ---- */
+
+.sh-files {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 30rem minmax(0, 1fr);
+}
+
+.sh-tree-pane,
+.sh-edit-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.sh-tree-pane {
+    border-right: 1px solid var(--hmm-border);
+    padding: 8px 8px 0;
+    gap: 6px;
+}
+
+/* the places: five buttons of one width, whatever they are called */
+.sh-shortcuts {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.hmm-button.sh-short {
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--hmm-font-size-small);
+}
+
+.hmm-button.sh-short.on {
+    border-color: var(--hmm-accent);
+    color: var(--hmm-accent);
+}
+
+.sh-goto {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 5.5rem;
+    gap: 4px;
+}
+
+.hmm-button.sh-go {
+    text-align: center;
+}
+
+/* the actions: a grid, so every button is as wide as its cell and never as wide as its label */
+.sh-acts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.sh-acts > * {
+    min-width: 0;
+    display: grid;
+}
+
+.hmm-button.sh-act {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sh-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.sh-where {
+    margin: 0;
+    height: 1.4em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--hmm-font-size-small);
+}
+
+.sh-tree {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--hmm-border-muted);
+    border-radius: var(--hmm-radius);
+    background: var(--hmm-bg-sunken);
+}
+
+.sh-tree.dropping {
+    border-color: var(--hmm-accent);
+    border-style: dashed;
+}
+
+.sh-tree-note {
+    margin: 0;
+    padding: 4px 8px;
+}
+
+.sh-error-text {
+    color: var(--hmm-error);
+}
+
+/* a row keeps its height and its columns: the name takes what is left and is cut */
+.sh-row {
+    display: grid;
+    grid-template-columns: 0.9rem 1.1rem minmax(0, 1fr) 1rem 3.8rem 5.4rem;
+    align-items: center;
+    gap: 3px;
+    width: 100%;
+    height: 1.75rem;
+    box-sizing: border-box;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.sh-row:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--hmm-accent) 10%, transparent);
+}
+
+.sh-row.on {
+    background: color-mix(in srgb, var(--hmm-accent) 30%, transparent);
+}
+
+.sh-row:disabled {
+    cursor: default;
+    opacity: 0.7;
+}
+
+.sh-chev {
+    color: var(--hmm-fg-muted);
+    font-size: 0.8em;
+}
+
+.sh-ico {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    vertical-align: -0.15em;
+    color: var(--hmm-fg-muted);
+}
+
+.sh-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sh-name.broken {
+    color: var(--hmm-error);
+    text-decoration: line-through;
+}
+
+.sh-target {
+    color: var(--hmm-fg-muted);
+}
+
+.sh-lock {
+    grid-column: 4;
+    line-height: 0;
+}
+
+.sh-size {
+    grid-column: 5;
+    text-align: right;
+    color: var(--hmm-fg-muted);
+    font-size: var(--hmm-font-size-small);
+}
+
+.sh-time {
+    grid-column: 6;
+    text-align: right;
+    color: var(--hmm-fg-muted);
+    font-size: var(--hmm-font-size-small);
+}
+
+.sh-sel {
+    padding: 2px 0 8px;
+}
+
+.sh-sel-line {
+    display: block;
+    margin: 0 0 2px;
+    height: 1.4em;
+}
+
+.sh-edit-pane {
+    padding: 8px 8px 0;
+    gap: 4px;
+}
+
+.sh-edit-head,
+.sh-edit-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 2rem;
+}
+
+.sh-edit-path {
+    flex: 1;
+    min-width: 0;
+}
+
+/* the editor's pill: one width for "Nur lesen", "Bearbeiten", "Vergleich", "Zu groß" */
+.sh-pill.sh-pill-mode {
+    flex: none;
+    width: 8.5rem;
+    height: calc(1.4em + 4px);
+    line-height: 1.4em;
+}
+
+/* the status keeps its box whatever the last save did */
+.sh-status {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 1.4em;
+    line-height: 1.4em;
+    color: var(--hmm-fg-muted);
+}
+
+.sh-status.ok {
+    color: var(--hmm-ok);
+}
+
+.sh-status.bad {
+    color: var(--hmm-error);
+}
+
+.sh-edit-tools .hmm-button.sh-act,
+.sh-edit-tools > * > .hmm-button.sh-act,
+.sh-edit-empty .hmm-button.sh-act {
+    width: 9rem;
+    flex: none;
+}
+
+.sh-edit-note {
+    display: block;
+    margin: 0;
+    height: 1.4em;
+    color: var(--hmm-fg-muted);
+}
+
+.sh-edit-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--hmm-border-muted);
+    border-radius: var(--hmm-radius) var(--hmm-radius) 0 0;
+    border-bottom: 0;
+    overflow: hidden;
+}
+
+.sh-edit-empty {
+    margin: 0;
+    padding: 16px;
+}
+
+.sh-monaco {
+    flex: 1;
+    min-height: 0;
+}
+
+.sh-plain {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 8px;
+    border: 0;
+    resize: none;
+    background: var(--hmm-bg);
+    color: var(--hmm-fg);
+    font-family: var(--hmm-font-mono);
+    font-size: 13px;
+    line-height: 1.45;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 4;
+}
+
+.sh-plain:focus {
+    outline: none;
+}
+
+.sh-hex {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 8px;
+    overflow: auto;
+    font-family: var(--hmm-font-mono);
+    font-size: 12.5px;
+    line-height: 1.4;
+    background: var(--hmm-bg-sunken);
+}
+
+.hmm-button.sh-back {
+    flex: none;
+    width: 6rem;
+    text-align: center;
+}
+
+/* ---- the files tab's dialogs ---- */
+
+.sh-full {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.sh-stack {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0 4px;
+}
+
+.sh-props {
+    grid-template-columns: 7rem minmax(0, 1fr);
+}
+
+.sh-fieldset {
+    margin: 0 0 4px;
+    padding: 6px 10px 8px;
+    border: 1px solid var(--hmm-border);
+    border-radius: var(--hmm-radius);
+    min-width: 0;
+}
+
+.sh-fieldset:disabled {
+    opacity: 0.6;
+}
+
+.sh-form-props {
+    grid-template-columns: 9rem 12rem minmax(0, 1fr);
+}
+
+.sh-form-props .hmm-select {
+    width: 12rem;
+    box-sizing: border-box;
+}
+
+.sh-bits {
+    margin: 0 0 8px 9rem;
+    border-collapse: collapse;
+}
+
+.sh-bits th,
+.sh-bits td {
+    width: 5.5rem;
+    padding: 2px 4px;
+    text-align: center;
+    font-weight: normal;
+    color: var(--hmm-fg-muted);
+}
+
+.sh-bits tbody th {
+    text-align: left;
+    color: var(--hmm-fg);
+}
+
+.sh-h3 {
+    font-size: 0.95rem;
+    margin: 4px 0 4px;
+}
+
+.sh-backups {
+    max-height: 11rem;
+    overflow: auto;
+    border: 1px solid var(--hmm-border-muted);
+    border-radius: var(--hmm-radius);
+    padding: 4px 8px;
+}
+
+.sh-backup {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 2.1rem;
+}
+
+.sh-col-kind {
+    width: 5rem;
+}
+
+/* the widest heading ("Endet ohne Eingabe in") on one line */
+.sh-col-idle {
+    width: 10.5rem;
+    white-space: nowrap;
+}
+
+/* a phone: one pane at a time */
+.sh-files.narrow {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.sh-files.narrow.show-tree .sh-edit-pane,
+.sh-files.narrow.show-editor .sh-tree-pane {
+    display: none;
+}
+
+.sh-files.narrow .sh-tree-pane {
+    border-right: 0;
+}
+
+@media (max-width: 760px) {
+    .sh-row {
+        grid-template-columns: 0.9rem 1.1rem minmax(0, 1fr) 1rem 3.8rem;
+    }
+    .sh-time {
+        display: none;
+    }
+    .sh-acts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .sh-edit-tools .hmm-button.sh-act,
+    .sh-edit-tools > * > .hmm-button.sh-act {
+        width: 7rem;
+    }
+    .sh-pill.sh-pill-mode {
+        width: 7rem;
+    }
+    .sh-bits {
+        margin-left: 0;
+    }
+    .sh-form-props {
+        grid-template-columns: 1fr;
+    }
+    .sh-bar-kind {
+        display: none;
+    }
+}

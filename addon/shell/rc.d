@@ -116,10 +116,14 @@ case "$1" in
         # directory by hand to be rid of them. The switch does not stay: a reinstalled addon is
         # off, as after any install. No password and no key is kept anywhere. Open root sessions
         # end with the daemon, and the notice on the Status page goes with the addon.
+        #
+        # The editor's backups in /usr/local/shell-backups stay, on purpose: they are root's
+        # (this script runs as the addon's user and could not remove them), and they may be the
+        # only copy of a file the user overwrote. The readme says so, and how to remove them.
         rm -f $CONF_DIR/addons/$ADDON/state.json
         rm -rf $ADDON_DIR/app $ADDON_DIR/www $ADDON_DIR/rc.d $ADDON_DIR/versions $ADDON_DIR/etc/lighttpd.conf $ADDON_DIR/var
         rm -f $PIDFILE
-        log info "Uninstalled $ADDON (the limits kept in $CONF_DIR/addons/$ADDON, the switch off)"
+        log info "Uninstalled $ADDON (the limits kept in $CONF_DIR/addons/$ADDON, the switch off; the editor's backups in /usr/local/shell-backups stay)"
         ;;
     *) exit 0 ;;
 esac

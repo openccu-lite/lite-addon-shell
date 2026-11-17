@@ -13,7 +13,10 @@ import (
 	"github.com/openccu-lite/lite-addon-shell/internal/sshc"
 )
 
-// The terminal's WebSocket, GET /api/v1/sessions/{id}/tty.
+// The session's WebSocket: GET /api/v1/sessions/{id}/tty for a terminal, .../link for files. A
+// files session's socket carries no bytes of its own - the files travel as requests - but it is
+// how the tab holds the session (a tab that is gone for the grace ends it) and how it learns at
+// once that the session ended, and why.
 //
 // The first message is the tab's: text, {"handle": "...", "cols": 80, "rows": 24}. The handle is
 // what POST /sessions answered; it lives in the tab's memory, never in a URL or a cookie, so
@@ -48,7 +51,11 @@ type control struct {
 	Rows int    `json:"rows,omitempty"`
 }
 
-func (s *server) tty(w http.ResponseWriter, r *http.Request) {
+func (s *server) attach(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.socket(w, r, kind) }
+}
+
+func (s *server) socket(w http.ResponseWriter, r *http.Request, kind string) {
 	id := r.PathValue("id")
 	c := s.caller(r)
 	// refused before the upgrade, so the page gets a status it can show
@@ -57,7 +64,7 @@ func (s *server) tty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, ok := s.o.Sessions.Get(id)
-	if !ok {
+	if !ok || info.Kind != kind {
 		fail(w, http.StatusNotFound, "not-found", "no such session", nil)
 		return
 	}

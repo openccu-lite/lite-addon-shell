@@ -1,7 +1,8 @@
 // Package sessions is the table of open root sessions: who holds which, the limits (how many at
-// once, idle, longest), the lockout after wrong passwords, and the hand-over of a session's
-// terminal bytes to the browser tab that holds its handle. A session is one SSH connection, owned
-// by one web session of an administrator; it ends with that web session, with its limits, with
+// once, idle, longest), the lockout after wrong passwords, and the hand-over of a session to the
+// browser tab that holds its handle. A session is one SSH connection, owned by one web session of
+// an administrator: a terminal (a shell on a pty) or files (the SFTP subsystem). Both kinds count
+// against the same limit and end the same ways: with that web session, with their limits, with
 // the addon's switch and with SSH. Nothing typed and nothing shown is logged; the audit lines say
 // who opened and closed what.
 package sessions
@@ -34,6 +35,7 @@ const (
 	ReasonConnection = "connection" // the SSH connection was lost
 	ReasonStopping   = "stopping"   // the addon's service stops (an update, a reboot)
 	ReasonUnverified = "unverified" // the system could not be asked about the web session
+	ReasonStuck      = "stuck"      // a file did not answer, and the SFTP server waits on it
 )
 
 const (
@@ -48,18 +50,33 @@ const (
 	LockoutFor      = 15 * time.Minute
 )
 
-// Shell is an open root shell (sshc.Shell; a fake in the tests).
-type Shell interface {
-	io.Reader
-	io.Writer
-	Resize(sshc.Size) error
+// The kinds of a session.
+const (
+	KindTerminal = "terminal"
+	KindFiles    = "files"
+)
+
+// Conn is a session's SSH connection: Done is closed when it has ended, Clean says whether it
+// ended by itself (a shell's exit) rather than with the connection.
+type Conn interface {
 	Done() <-chan struct{}
 	Clean() bool
 	Close()
 }
 
+// Shell is an open root shell (sshc.Shell; a fake in the tests).
+type Shell interface {
+	io.Reader
+	io.Writer
+	Resize(sshc.Size) error
+	Conn
+}
+
 // Opener signs in and opens a shell (sshc.Client behind a small adapter; a fake in the tests).
 type Opener func(ctx context.Context, password string, size sshc.Size) (Shell, error)
+
+// FilesOpener signs in and opens the SFTP subsystem (sshc.Client.OpenFiles behind an adapter).
+type FilesOpener func(ctx context.Context, password string) (Conn, error)
 
 // Limits are the limits in force (config.Settings as durations).
 type Limits struct {
@@ -69,8 +86,10 @@ type Limits struct {
 
 // Options configure a Manager.
 type Options struct {
-	Open   Opener
-	Limits func() Limits
+	Open Opener
+	// OpenFiles opens a files session; nil: there are none.
+	OpenFiles FilesOpener
+	Limits    func() Limits
 	// Audit writes one audit line to the journal.
 	Audit func(format string, args ...any)
 	// OnChange is called (outside the lock) when the table changed, for the page's event stream.
@@ -125,10 +144,14 @@ func (e *WrongPasswordError) Error() string { return "wrong password" }
 
 type session struct {
 	id, handle string
+	kind       string
 	who        Who
 	since      time.Time
-	input      time.Time
-	shell      Shell
+	// input is the user's last doing: what was typed in a terminal, a request of the files page
+	input time.Time
+	// conn is the session's connection; shell is the same thing for a terminal, nil for files
+	conn  Conn
+	shell Shell
 
 	ring []byte
 	att  *Attachment
@@ -205,7 +228,7 @@ func New(o Options) *Manager {
 
 func (m *Manager) info(s *session) Info {
 	l := m.o.Limits()
-	return Info{ID: s.id, Kind: "terminal", User: s.who.User, Client: s.who.Client, Owner: s.who.SID,
+	return Info{ID: s.id, Kind: s.kind, User: s.who.User, Client: s.who.Client, Owner: s.who.SID,
 		Since: s.since.UnixMilli(), Input: s.input.UnixMilli(),
 		IdleEnds: s.input.Add(l.Idle).UnixMilli(), Ends: s.since.Add(l.Longest).UnixMilli(), Attached: s.att != nil}
 }
@@ -301,10 +324,35 @@ func (m *Manager) Locked(who Who) time.Time {
 	return m.lockedLocked(who, m.o.Now())
 }
 
-// Open signs who in to sshd with the password and opens a session. The errors: *LockedError,
-// *TooManyError, *WrongPasswordError, sshc.ErrOff, sshc.ErrKeysOnly, sshc.ErrHostKey, or the
-// connection's. The handle is the secret a tab attaches with; it is answered once, here.
+// Open signs who in to sshd with the password and opens a terminal session. The errors:
+// *LockedError, *TooManyError, *WrongPasswordError, sshc.ErrOff, sshc.ErrKeysOnly, sshc.ErrHostKey,
+// or the connection's. The handle is the secret a tab attaches with; it is answered once, here.
 func (m *Manager) Open(ctx context.Context, who Who, password string, size sshc.Size) (Info, string, error) {
+	return m.open(who, KindTerminal, func() (Conn, Shell, error) {
+		sh, err := m.o.Open(ctx, password, size)
+		if err != nil {
+			return nil, nil, err
+		}
+		return sh, sh, nil
+	})
+}
+
+// OpenFiles is Open for a files session: the same sign-in, the same limits, the same lockout; the
+// error can also be sshc.ErrNoSFTP. The handle travels with every request of the files page.
+func (m *Manager) OpenFiles(ctx context.Context, who Who, password string) (Info, string, error) {
+	return m.open(who, KindFiles, func() (Conn, Shell, error) {
+		if m.o.OpenFiles == nil {
+			return nil, nil, sshc.ErrNoSFTP
+		}
+		c, err := m.o.OpenFiles(ctx, password)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c, nil, nil
+	})
+}
+
+func (m *Manager) open(who Who, kind string, dial func() (Conn, Shell, error)) (Info, string, error) {
 	now := m.o.Now()
 	m.mu.Lock()
 	if until := m.lockedLocked(who, now); !until.IsZero() {
@@ -318,7 +366,7 @@ func (m *Manager) Open(ctx context.Context, who Who, password string, size sshc.
 	}
 	m.mu.Unlock()
 
-	shell, err := m.o.Open(ctx, password, size)
+	conn, shell, err := dial()
 	now = m.o.Now()
 	if err != nil {
 		if errors.Is(err, sshc.ErrWrongPassword) {
@@ -335,7 +383,7 @@ func (m *Manager) Open(ctx context.Context, who Who, password string, size sshc.
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		shell.Close()
+		conn.Close()
 		return Info{}, "", err
 	}
 	m.mu.Lock()
@@ -343,25 +391,27 @@ func (m *Manager) Open(ctx context.Context, who Who, password string, size sshc.
 	if len(m.sessions) >= m.o.Limits().MaxSessions {
 		list := m.listLocked()
 		m.mu.Unlock()
-		shell.Close()
+		conn.Close()
 		return Info{}, "", &TooManyError{Sessions: list}
 	}
 	for _, k := range failKeys(who) {
 		delete(m.fails, k)
 	}
 	m.seq++
-	s := &session{id: strconv.Itoa(m.seq), handle: hex.EncodeToString(raw), who: who, since: now, input: now, shell: shell,
+	s := &session{id: strconv.Itoa(m.seq), handle: hex.EncodeToString(raw), kind: kind, who: who, since: now, input: now, conn: conn, shell: shell,
 		detached: now, done: make(chan struct{})}
 	m.sessions[s.id] = s
 	info := m.info(s)
 	m.mu.Unlock()
-	m.o.Audit("session-open kind=terminal user=%s client=%s id=%s auth=password", clean(who.User), clean(who.Client), s.id)
-	go m.pump(s)
+	m.o.Audit("session-open kind=%s user=%s client=%s id=%s auth=password", kind, clean(who.User), clean(who.Client), s.id)
+	if shell != nil {
+		go m.pump(s)
+	}
 	go func() {
 		select {
-		case <-shell.Done():
+		case <-conn.Done():
 			reason := ReasonExit
-			if !shell.Clean() {
+			if !conn.Clean() {
 				reason = ReasonConnection
 				if m.o.Lost != nil {
 					reason = m.o.Lost()
@@ -446,11 +496,26 @@ func (m *Manager) Detach(id string, a *Attachment) {
 	}
 }
 
+// Files answers a files session's connection to the request that names its handle and comes from
+// the web session that opened it, and counts the request as the user's doing: it resets the idle
+// time. ErrNoHandle for anything else - no session, a terminal, another web session, not the
+// handle.
+func (m *Manager) Files(id, handle, sid string) (Conn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[id]
+	if !ok || s.kind != KindFiles || s.who.SID != sid || subtle.ConstantTimeCompare([]byte(s.handle), []byte(handle)) != 1 {
+		return nil, ErrNoHandle
+	}
+	s.input = m.o.Now()
+	return s.conn, nil
+}
+
 // Input is what the user typed or pasted; it resets the idle time.
 func (m *Manager) Input(id string, a *Attachment, data []byte) error {
 	m.mu.Lock()
 	s, ok := m.sessions[id]
-	if !ok || s.att != a {
+	if !ok || s.att != a || s.shell == nil {
 		m.mu.Unlock()
 		return ErrNoHandle
 	}
@@ -465,7 +530,7 @@ func (m *Manager) Input(id string, a *Attachment, data []byte) error {
 func (m *Manager) Resize(id string, a *Attachment, size sshc.Size) error {
 	m.mu.Lock()
 	s, ok := m.sessions[id]
-	if !ok || s.att != a {
+	if !ok || s.att != a || s.shell == nil {
 		m.mu.Unlock()
 		return ErrNoHandle
 	}
@@ -500,7 +565,7 @@ func (m *Manager) endLocked(s *session, reason string) {
 		s.att = nil
 	}
 	s.ring = nil
-	go s.shell.Close()
+	go s.conn.Close()
 	m.o.Audit("session-close id=%s user=%s reason=%s duration=%d", s.id, clean(s.who.User), reason, int(m.o.Now().Sub(s.since).Seconds()))
 }
 

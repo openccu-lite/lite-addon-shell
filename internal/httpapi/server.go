@@ -42,9 +42,11 @@ type Options struct {
 	Wrap func(http.Handler) http.Handler
 	// InsecureHTTP admits plain HTTP (development and the page's tests only).
 	InsecureHTTP bool
-	Version      string
-	Started      time.Time
-	Log          func(format string, args ...any)
+	// ReadTimeout is how long a file may take to be read for the editor; 15 s by default.
+	ReadTimeout time.Duration
+	Version     string
+	Started     time.Time
+	Log         func(format string, args ...any)
 }
 
 // Routes lists every "METHOD /path" the API serves; the readme's table is held to it by a test.
@@ -53,6 +55,10 @@ var Routes []string
 type server struct {
 	o   Options
 	hub *hub
+
+	// the one-time tickets of downloads
+	tmu     sync.Mutex
+	tickets map[string]ticket
 }
 
 // hub tells the pages' event streams that something changed.
@@ -98,7 +104,10 @@ func New(o Options) (http.Handler, func()) {
 	if o.Log == nil {
 		o.Log = func(string, ...any) {}
 	}
-	s := &server{o: o, hub: &hub{subs: map[chan struct{}]bool{}}}
+	if o.ReadTimeout == 0 {
+		o.ReadTimeout = 15 * time.Second
+	}
+	s := &server{o: o, hub: &hub{subs: map[chan struct{}]bool{}}, tickets: map[string]ticket{}}
 	Routes = nil
 	api := http.NewServeMux()
 	handle(api, "GET /api/v1/health", s.health)
@@ -108,7 +117,9 @@ func New(o Options) (http.Handler, func()) {
 	handle(api, "POST /api/v1/sessions", s.openSession)
 	handle(api, "DELETE /api/v1/sessions", s.endAll)
 	handle(api, "DELETE /api/v1/sessions/{id}", s.endSession)
-	handle(api, "GET /api/v1/sessions/{id}/tty", s.tty)
+	handle(api, "GET /api/v1/sessions/{id}/tty", s.attach(sessions.KindTerminal))
+	handle(api, "GET /api/v1/sessions/{id}/link", s.attach(sessions.KindFiles))
+	s.fsRoutes(api)
 	handle(api, "GET /api/v1/events", s.events)
 	handle(api, "GET /api/v1/audit", s.audit)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -131,18 +142,28 @@ func New(o Options) (http.Handler, func()) {
 // into it. xterm.js sets styles from script, hence style-src's 'unsafe-inline'.
 const TerminalCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
-// pageHeaders sets the security headers of the page's files; the terminal page refuses framing.
+// FilesCSP is the files page's policy: the terminal's, with the editor's workers and its icon
+// font named - both are files of the page itself, never a blob or another origin.
+const FilesCSP = "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+// The pages that hold a root session: each is a tab of its own that refuses framing.
+var sessionPages = map[string]string{"/terminal": TerminalCSP, "/files": FilesCSP}
+
+// pageHeaders sets the security headers of the page's files; the terminal and the files page
+// refuse framing.
 func pageHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		if p := strings.TrimSuffix(r.URL.Path, "/"); p == "/terminal.html" || p == "/terminal" {
-			w.Header().Set("Content-Security-Policy", TerminalCSP)
+		p := strings.TrimSuffix(r.URL.Path, "/")
+		name := strings.TrimSuffix(p, ".html")
+		if csp, ok := sessionPages[name]; ok {
+			w.Header().Set("Content-Security-Policy", csp)
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Cache-Control", "no-store")
-			if p == "/terminal" {
+			if p == name {
 				r = r.Clone(r.Context())
-				r.URL.Path = "/terminal.html"
+				r.URL.Path = name + ".html"
 			}
 		}
 		next.ServeHTTP(w, r)
@@ -368,7 +389,8 @@ func (s *server) putEnabled(w http.ResponseWriter, r *http.Request) {
 	s.state(w, r)
 }
 
-// PUT /api/v1/settings: the limits and the tunnel switch.
+// PUT /api/v1/settings: the limits, the tunnel switch, and whether the files page may change
+// anything.
 func (s *server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var set config.Settings
 	if !decode(w, r, &set) {
@@ -386,21 +408,30 @@ func (s *server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if old != set {
 		c := s.caller(r)
-		s.o.Audit.Printf("settings by=%s idle_minutes=%d max_hours=%d max_sessions=%d allow_tunnel=%t", c.who.User, set.IdleMinutes, set.MaxHours, set.MaxSessions, set.AllowTunnel)
+		s.o.Audit.Printf("settings by=%s idle_minutes=%d max_hours=%d max_sessions=%d allow_tunnel=%t files_read_only=%t", c.who.User, set.IdleMinutes, set.MaxHours, set.MaxSessions, set.AllowTunnel, set.FilesReadOnly)
 		s.hub.ping()
 	}
 	s.state(w, r)
 }
 
-// POST /api/v1/sessions {password, cols, rows}: signs in to sshd as root and opens a session.
-// 201 {session, handle}; the handle is the tab's secret for the terminal's WebSocket.
+// POST /api/v1/sessions {kind, password, cols, rows}: signs in to sshd as root and opens a
+// session - a terminal, or files (kind "files"). 201 {session, handle}; the handle is the tab's
+// secret: the first message on the session's WebSocket, and a header on every request for files.
 func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Kind     string `json:"kind"`
 		Password string `json:"password"`
 		Cols     int    `json:"cols"`
 		Rows     int    `json:"rows"`
 	}
 	if !decode(w, r, &body) {
+		return
+	}
+	if body.Kind == "" {
+		body.Kind = sessions.KindTerminal
+	}
+	if body.Kind != sessions.KindTerminal && body.Kind != sessions.KindFiles {
+		fail(w, http.StatusUnprocessableEntity, "invalid", "kind is terminal or files", nil)
 		return
 	}
 	c := s.caller(r)
@@ -430,7 +461,13 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	info, handle, err := s.o.Sessions.Open(ctx, c.who, body.Password, sshc.Size{Cols: body.Cols, Rows: body.Rows})
+	var info sessions.Info
+	var handle string
+	if body.Kind == sessions.KindFiles {
+		info, handle, err = s.o.Sessions.OpenFiles(ctx, c.who, body.Password)
+	} else {
+		info, handle, err = s.o.Sessions.Open(ctx, c.who, body.Password, sshc.Size{Cols: body.Cols, Rows: body.Rows})
+	}
 	body.Password = ""
 	var locked *sessions.LockedError
 	var many *sessions.TooManyError
@@ -459,6 +496,10 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, sshc.ErrHostKey):
 		fail(w, http.StatusBadGateway, "host-key", err.Error(), nil)
+		return
+	case errors.Is(err, sshc.ErrNoSFTP):
+		s.o.Log("a files session could not be opened: %v", err)
+		fail(w, http.StatusBadGateway, "no-sftp", "the SSH server offers no SFTP", nil)
 		return
 	default:
 		s.o.Log("a sign-in failed: %v", err)

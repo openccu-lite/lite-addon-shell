@@ -87,6 +87,18 @@ func newEnv(t *testing.T) *env {
 			e.mu.Unlock()
 			return sh, nil
 		},
+		OpenFiles: func(_ context.Context, password string) (Conn, error) {
+			if password != "root-pass" {
+				return nil, sshc.ErrWrongPassword
+			}
+			// a files session's connection: the same fake, never read as a shell
+			sh := newFakeShell()
+			sh.clean = false
+			e.mu.Lock()
+			e.shells = append(e.shells, sh)
+			e.mu.Unlock()
+			return sh, nil
+		},
 		Limits: func() Limits { e.mu.Lock(); defer e.mu.Unlock(); return e.limits },
 		Audit: func(format string, args ...any) {
 			e.mu.Lock()
@@ -399,5 +411,80 @@ func TestClean(t *testing.T) {
 		if got := clean(in); got != want {
 			t.Errorf("clean(%q) = %q", in, got)
 		}
+	}
+}
+
+// A files session is a session: it counts against the limit and the lockout, ends idle unless a
+// request for files is made, and answers only to its handle from the web session that opened it.
+func TestFilesSession(t *testing.T) {
+	e := newEnv(t)
+	info, handle, err := e.m.OpenFiles(context.Background(), alice, "root-pass")
+	if err != nil || info.Kind != KindFiles || len(handle) != 64 {
+		t.Fatalf("%+v %q %v", info, handle, err)
+	}
+	term, termHandle := e.open(bob)
+	if term.Kind != KindTerminal {
+		t.Fatalf("a terminal's kind: %q", term.Kind)
+	}
+	// both kinds count against the one limit
+	var many *TooManyError
+	if _, _, err := e.m.OpenFiles(context.Background(), alice, "root-pass"); !errors.As(err, &many) {
+		t.Fatalf("a third session: %v", err)
+	}
+	// the connection goes to the handle's holder in the same web session only
+	if c, err := e.m.Files(info.ID, handle, alice.SID); err != nil || c != Conn(e.shells[0]) {
+		t.Fatalf("%v %v", c, err)
+	}
+	for _, c := range []struct{ id, handle, sid string }{
+		{info.ID, handle, bob.SID}, {info.ID, termHandle, alice.SID}, {info.ID, "", alice.SID}, {term.ID, termHandle, bob.SID}, {"99", handle, alice.SID},
+	} {
+		if _, err := e.m.Files(c.id, c.handle, c.sid); !errors.Is(err, ErrNoHandle) {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+	// a files session takes no terminal input
+	att, _, err := e.m.Attach(info.ID, handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Input(info.ID, att, []byte("x")); !errors.Is(err, ErrNoHandle) {
+		t.Fatalf("input to a files session: %v", err)
+	}
+	// a request is the user's doing: the idle time starts again, and only then
+	e.advance(10 * time.Minute)
+	if _, err := e.m.Files(info.ID, handle, alice.SID); err != nil {
+		t.Fatal(err)
+	}
+	e.advance(10 * time.Minute)
+	if _, ok := e.m.Get(info.ID); !ok {
+		t.Fatal("ended although there was a request")
+	}
+	if _, ok := e.m.Get(term.ID); ok {
+		t.Fatal("the terminal without input is still open")
+	}
+	e.advance(6 * time.Minute)
+	if _, ok := e.m.Get(info.ID); ok {
+		t.Fatal("a files session without a request did not end")
+	}
+	if reason := waitGone(t, att); reason != ReasonIdle {
+		t.Fatalf("reason %q", reason)
+	}
+	// its connection going away ends it as a lost connection, never as an exit
+	info, _, err = e.m.OpenFiles(context.Background(), alice, "root-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.shells[len(e.shells)-1].Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for e.m.Count() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.m.Count() != 0 {
+		t.Fatal("the session outlived its connection")
+	}
+	// a wrong password counts here as at a terminal
+	var wrong *WrongPasswordError
+	if _, _, err := e.m.OpenFiles(context.Background(), alice, "nope"); !errors.As(err, &wrong) || wrong.TriesLeft != LockoutFailures-1 {
+		t.Fatalf("%v", err)
 	}
 }

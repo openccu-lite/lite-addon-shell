@@ -6,13 +6,15 @@
 #   this script is read by the system before this script runs; the unit, the proxy rule and the
 #   menu entry are the system's.
 #
-#   The addon's tree is shell/ next to this script: bin/lite-shell (the daemon), app/ (the page and
-#   the terminal, served by the daemon at /addons/shell/), www/ (the icons and the 503
-#   page), rc.d (the service script), etc/lighttpd.conf (the proxy rule).
+#   The addon's tree is shell/ next to this script: bin/lite-shell (the daemon), app/ (the page,
+#   the terminal and the files page, served by the daemon at /addons/shell/), www/ (the icons and
+#   the 503 page), rc.d (the service script), etc/lighttpd.conf (the proxy rule).
 #
 #   The data stays: the settings live in /usr/local/etc/config/addons/shell (the limits and the
 #   switch's state; no password, no key). An update touches neither; an uninstall and a fresh
 #   install keep the limits and remove the switch's state: the addon is off after every install.
+#   The editor's backups (/usr/local/shell-backups, root's, written over the user's own SSH
+#   session) are no business of this script: neither an install nor an uninstall touches them.
 #
 
 ADDON=shell

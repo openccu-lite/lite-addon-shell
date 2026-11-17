@@ -24,6 +24,9 @@ type Settings struct {
 	MaxSessions int `json:"max_sessions"`
 	// AllowTunnel admits requests that came in through a tunnel addon's web ingress.
 	AllowTunnel bool `json:"allow_tunnel"`
+	// FilesReadOnly makes the files page read-only altogether: it shows and downloads, and
+	// changes nothing.
+	FilesReadOnly bool `json:"files_read_only"`
 }
 
 // The defaults and the bounds: idle 15 minutes, the longest session 8 hours, at most 2 sessions at

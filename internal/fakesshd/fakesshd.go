@@ -1,8 +1,10 @@
 // Package fakesshd is an SSH server for the tests and the page's development: it speaks the real
 // protocol (golang.org/x/crypto/ssh), takes one account's password or refuses passwords
 // altogether ("keys only"), and runs a small shell of its own on the pty - a prompt, an echo, and
-// a handful of commands (id, whoami, echo, size, flood, sleep, exit). No process is started and
-// no file is touched. The end-to-end test in test/sshd runs against a real OpenSSH sshd instead.
+// a handful of commands (id, whoami, echo, size, flood, sleep, exit). With a Tree it also offers
+// the SFTP subsystem over a scratch directory (sftp.go). No process is started, and no file
+// outside that directory is touched. The end-to-end test in test/sshd runs against a real OpenSSH
+// sshd instead.
 package fakesshd
 
 import (
@@ -18,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,6 +28,9 @@ import (
 type Server struct {
 	// User and Password are the one account ("root" by default).
 	User, Password string
+	// Files is what the SFTP subsystem serves; nil: the subsystem is refused, as by an sshd
+	// without a Subsystem line.
+	Files *Tree
 
 	mu       sync.Mutex
 	keysOnly bool
@@ -175,7 +181,7 @@ func (s *Server) serve(c net.Conn) {
 		if err != nil {
 			return
 		}
-		go session(ch, creqs)
+		go session(ch, creqs, s.Files)
 	}
 }
 
@@ -184,10 +190,11 @@ type winsize struct {
 	cols, rows uint32
 }
 
-func session(ch ssh.Channel, reqs <-chan *ssh.Request) {
+func session(ch ssh.Channel, reqs <-chan *ssh.Request, files *Tree) {
 	defer ch.Close()
 	ws := &winsize{cols: 80, rows: 24}
-	started := make(chan bool, 1)
+	// what the channel became: "shell" or "sftp"
+	started := make(chan string, 1)
 	go func() {
 		for r := range reqs {
 			ok := false
@@ -215,8 +222,17 @@ func session(ch ssh.Channel, reqs <-chan *ssh.Request) {
 			case "shell":
 				ok = true
 				select {
-				case started <- true:
+				case started <- "shell":
 				default:
+				}
+			case "subsystem":
+				// string name
+				if len(r.Payload) >= 4 && string(r.Payload[4:]) == "sftp" && files != nil {
+					ok = true
+					select {
+					case started <- "sftp":
+					default:
+					}
 				}
 			case "env":
 				ok = true
@@ -226,9 +242,14 @@ func session(ch ssh.Channel, reqs <-chan *ssh.Request) {
 			}
 		}
 	}()
+	var kind string
 	select {
-	case <-started:
+	case kind = <-started:
 	case <-time.After(10 * time.Second):
+		return
+	}
+	if kind == "sftp" {
+		_ = sftp.NewRequestServer(ch, files.Handlers()).Serve()
 		return
 	}
 	status := shell(ch, ws)

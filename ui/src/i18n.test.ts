@@ -6,7 +6,7 @@ import {END_REASONS} from './model.js';
 
 type Entry = {de?: string; en?: string};
 
-// every t('…') of the pages and every message key model.ts hands out has its German and English text
+// every t('…') of the pages and every message key model.ts and fs.ts hand out has its German and English text
 describe('messages', () => {
     it('covers every key', () => {
         const dir = process.cwd() + '/src/';
@@ -19,17 +19,30 @@ describe('messages', () => {
                 if (!e?.de || !e?.en) missing.push(`${f}: ${key}`);
             }
         }
-        // model.ts names its keys as label:, key: and plain returned strings
-        const model = readFileSync(dir + 'model.ts', 'utf8');
-        for (const m of model.matchAll(/(?:label|key): '((?:[^'\\]|\\.)*)'/g)) {
-            const key = m[1]!.replace(/\\'/g, "'");
-            const e = MESSAGES[key] as Entry | undefined;
-            if (!e?.de || !e?.en) missing.push(`model.ts: ${key}`);
+        // the files page hands keys around as plain strings too: a place's label, a button's
+        // label, the pill's label, and the sentence that says why a button is blocked
+        const files = readFileSync(dir + 'Files.svelte', 'utf8');
+        const handed = [/label: '((?:[^'\\]|\\.)+)'/g, /@render act\('((?:[^'\\]|\\.)+)'/g, /'([A-Z](?:[^'\\]|\\.){6,}\.)'/g];
+        for (const re of handed) {
+            for (const m of files.matchAll(re)) {
+                const key = m[1]!.replace(/\\'/g, "'");
+                const e = MESSAGES[key] as Entry | undefined;
+                if (!e?.de || !e?.en) missing.push(`Files.svelte: ${key}`);
+            }
         }
-        for (const m of model.matchAll(/return '((?:[^'\\]|\\.){12,})';/g)) {
-            const key = m[1]!.replace(/\\'/g, "'");
-            const e = MESSAGES[key] as Entry | undefined;
-            if (!e?.de || !e?.en) missing.push(`model.ts: ${key}`);
+        // model.ts and fs.ts name their keys as label:, key: and plain returned strings
+        for (const name of ['model.ts', 'fs.ts']) {
+            const model = readFileSync(dir + name, 'utf8');
+            for (const m of model.matchAll(/(?:label|key): '((?:[^'\\]|\\.)*)'/g)) {
+                const key = m[1]!.replace(/\\'/g, "'");
+                const e = MESSAGES[key] as Entry | undefined;
+                if (!e?.de || !e?.en) missing.push(`${name}: ${key}`);
+            }
+            for (const m of model.matchAll(/return '((?:[^'\\]|\\.){12,})';/g)) {
+                const key = m[1]!.replace(/\\'/g, "'");
+                const e = MESSAGES[key] as Entry | undefined;
+                if (!e?.de || !e?.en) missing.push(`${name}: ${key}`);
+            }
         }
         for (const r of END_REASONS) if (!MESSAGES['end.' + r]) missing.push('end.' + r);
         expect(missing).toEqual([]);

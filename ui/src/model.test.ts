@@ -3,8 +3,8 @@ import {describe, expect, it} from 'vitest';
 import {addonPill, blockReason, clock, countdown, END_REASONS, endReason, pasteLines, settingsEqual, settingsValid, signInError, sshPill, transportPill, windowLabel} from './model.js';
 import type {Settings, State} from './model.js';
 
-const settings: Settings = {idle_minutes: 15, max_hours: 8, max_sessions: 2, allow_tunnel: false};
-const bounds = {min: {idle_minutes: 5, max_hours: 1, max_sessions: 1, allow_tunnel: false}, max: {idle_minutes: 60, max_hours: 12, max_sessions: 4, allow_tunnel: false}};
+const settings: Settings = {idle_minutes: 15, max_hours: 8, max_sessions: 2, allow_tunnel: false, files_read_only: false};
+const bounds = {min: {...settings, idle_minutes: 5, max_hours: 1, max_sessions: 1}, max: {...settings, idle_minutes: 60, max_hours: 12, max_sessions: 4}};
 const base: State = {
     version: '0.1.0', now: Date.UTC(2026, 10, 17, 12, 0, 0), user: 'admin', enabled: true, ssh: 'on', transport: 'https', blocked: '', auth_off: false,
     settings, defaults: settings, bounds, windows: [1, 8, 0], window: 8, sessions: [],
@@ -114,5 +114,6 @@ describe('the settings form', () => {
         expect(settingsValid({...settings, max_sessions: 2.5}, bounds)).toBe(false);
         expect(settingsEqual(settings, {...settings})).toBe(true);
         expect(settingsEqual(settings, {...settings, allow_tunnel: true})).toBe(false);
+        expect(settingsEqual(settings, {...settings, files_read_only: true})).toBe(false);
     });
 });

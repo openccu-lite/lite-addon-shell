@@ -43,7 +43,7 @@
             /* the state's error says it */
         }
     }
-    let lastStored: Settings = {idle_minutes: 0, max_hours: 0, max_sessions: 0, allow_tunnel: false};
+    let lastStored: Settings = {idle_minutes: 0, max_hours: 0, max_sessions: 0, allow_tunnel: false, files_read_only: false};
 
     onMount(() => {
         void load();
@@ -120,10 +120,10 @@
             notices.push('info', t('The root shell is switched off. Open sessions were ended.'));
         });
 
-    function openShell() {
+    function openTab(page: 'terminal' | 'files') {
         // a tab of its own, without a reference back: a page framed on the system's origin cannot
-        // reach into it. Theme and language travel in the address, the terminal has no shell around it.
-        const url = new URL('terminal', document.baseURI);
+        // reach into it. Theme and language travel in the address, the tab has no shell around it.
+        const url = new URL(page, document.baseURI);
         url.searchParams.set('theme', theme.resolved);
         url.searchParams.set('lang', i18n.language);
         window.open(url.toString(), '_blank', 'noopener');
@@ -174,7 +174,7 @@
     {/if}
     <main class="sh-page">
         {#if state_ && pills && form}
-            <p class="sh-intro">{t('A root shell for this system in the browser, for when no ssh client is at hand. The addon itself is not root: each session signs in to the system\'s own SSH server with root\'s password, which is asked every time and stored nowhere. If you have an ssh client, use it.')}</p>
+            <p class="sh-intro">{t('A root shell and root\'s files for this system in the browser, for when no ssh client is at hand. The addon itself is not root: each session signs in to the system\'s own SSH server with root\'s password, which is asked every time and stored nowhere. If you have an ssh client, use it.')}</p>
 
             <section class="sh-card" data-testid="status">
                 <h2>{t('Status')}</h2>
@@ -208,7 +208,10 @@
                         </Tooltip>
                     {/if}
                     <Tooltip text={blocked ? t(blocked) : t('Opens in a tab of its own.')} testId="open-tip">
-                        <button class="hmm-button sh-wide sh-primary" onclick={openShell} disabled={!!blocked} data-testid="open">{t('Open shell')}</button>
+                        <button class="hmm-button sh-wide sh-primary" onclick={() => openTab('terminal')} disabled={!!blocked} data-testid="open">{t('Open shell')}</button>
+                    </Tooltip>
+                    <Tooltip text={blocked ? t(blocked) : t('Opens in a tab of its own.')} testId="open-files-tip">
+                        <button class="hmm-button sh-wide sh-primary" onclick={() => openTab('files')} disabled={!!blocked} data-testid="open-files">{t('Open files')}</button>
                     </Tooltip>
                 </div>
             </section>
@@ -222,16 +225,18 @@
                 <table class="sh-table">
                     <thead>
                         <tr>
+                            <th class="sh-col-kind">{t('Kind')}</th>
                             <th>{t('Account')}</th>
                             <th>{t('From')}</th>
                             <th>{t('Since')}</th>
-                            <th>{t('Ends without input in')}</th>
+                            <th class="sh-col-idle">{t('Ends without input in')}</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         {#each state_.sessions as s (s.id)}
                             <tr data-testid="session">
+                                <td data-testid="kind">{t(s.kind === 'files' ? 'Files' : 'Terminal')}</td>
                                 <td><span class="sh-cut" title={s.user}>{s.user}</span>{#if s.mine}<span class="sh-mine">{t('yours')}</span>{/if}</td>
                                 <td><span class="sh-cut sh-mono" title={s.client}>{s.client}</span></td>
                                 <td class="sh-num">{clock(s.since, serverNow, i18n.language)}</td>
@@ -239,7 +244,7 @@
                                 <td class="sh-right"><button class="hmm-button sh-narrow" onclick={() => end(s)} disabled={busy === 'end-' + s.id} data-testid="end">{t('End')}</button></td>
                             </tr>
                         {:else}
-                            <tr><td colspan="5" class="sh-muted" data-testid="no-sessions">{t('No session is open.')}</td></tr>
+                            <tr><td colspan="6" class="sh-muted" data-testid="no-sessions">{t('No session is open.')}</td></tr>
                         {/each}
                     </tbody>
                 </table>
@@ -263,6 +268,10 @@
                     <label for="tunnel">{t('Allow through a tunnel addon')}</label>
                     <input id="tunnel" type="checkbox" bind:checked={form.allow_tunnel} data-testid="allow-tunnel" />
                     <span></span>
+
+                    <label for="files-ro">{t('The files page only shows, and changes nothing')}</label>
+                    <input id="files-ro" type="checkbox" bind:checked={form.files_read_only} data-testid="files-read-only" />
+                    <span></span>
                 </div>
                 <p class="sh-muted sh-small">{t('Output does not count as input: a running command does not keep a session open.')} {t('Off by default: the firewall opens SSH to the local networks only, and a tunnel addon (WireGuard, Tailscale) would carry the shell to every tunnel peer.')}</p>
                 <div class="sh-actions">
@@ -272,7 +281,7 @@
 
             <section class="sh-card" data-testid="log">
                 <h2>{t('Log')}</h2>
-                <p class="sh-muted sh-small">{t('Who switched the shell on and off, and who opened and closed a session, since the addon\'s start. The same lines are in the system\'s log. What is typed in a session is never logged.')}</p>
+                <p class="sh-muted sh-small">{t('Who switched the shell on and off, who opened and closed a session, and which file was changed, since the addon\'s start. The same lines are in the system\'s log. What is typed in a session and what a file holds is never logged.')}</p>
                 <div class="sh-log">
                     {#each audit as e (e.at + e.line)}
                         <div class="sh-log-line"><span class="sh-num sh-muted">{clock(e.at, serverNow, i18n.language)}</span> <span class="sh-mono sh-cut" title={e.line}>{e.line}</span></div>

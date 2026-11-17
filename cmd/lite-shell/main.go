@@ -1,8 +1,9 @@
-// lite-shell is the lite-addon-shell daemon: a root shell for an openccu-lite system in the browser.
-// It runs confined (the addon's own user, no capability, no API scope, no port beyond the
-// loopback) and is never root itself: a session is an SSH connection to the system's own sshd on
-// the loopback, signed in with root's password, which the user types for each session and which
-// is kept nowhere. It serves its page and API on the loopback behind lighttpd's proxy of
+// lite-shell is the lite-addon-shell daemon: a root shell and root's files for an openccu-lite
+// system in the browser. It runs confined (the addon's own user, no capability, no API scope, no
+// port beyond the loopback) and is never root itself: a session is an SSH connection to the
+// system's own sshd on the loopback, signed in with root's password, which the user types for
+// each session and which is kept nowhere. A terminal is a shell on that connection, the files
+// page works over its SFTP subsystem: the daemon opens no file of the system itself. It serves its page and API on the loopback behind lighttpd's proxy of
 // /addons/shell/. openccu-lite only.
 package main
 
@@ -24,6 +25,7 @@ import (
 	"github.com/openccu-lite/lite-addon-shell/internal/audit"
 	"github.com/openccu-lite/lite-addon-shell/internal/config"
 	"github.com/openccu-lite/lite-addon-shell/internal/core"
+	"github.com/openccu-lite/lite-addon-shell/internal/files"
 	"github.com/openccu-lite/lite-addon-shell/internal/httpapi"
 	"github.com/openccu-lite/lite-addon-shell/internal/sessions"
 	"github.com/openccu-lite/lite-addon-shell/internal/sshc"
@@ -106,6 +108,13 @@ func run(o options) error {
 				return nil, err
 			}
 			return sh, nil
+		},
+		OpenFiles: func(ctx context.Context, password string) (sessions.Conn, error) {
+			f, err := files.Open(ctx, ssh, password, logf)
+			if err != nil {
+				return nil, err
+			}
+			return f, nil
 		},
 		Limits: func() sessions.Limits {
 			s := store.Settings()

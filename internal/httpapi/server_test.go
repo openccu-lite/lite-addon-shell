@@ -21,6 +21,7 @@ import (
 	"github.com/openccu-lite/lite-addon-shell/internal/core"
 	"github.com/openccu-lite/lite-addon-shell/internal/fakesshd"
 	"github.com/openccu-lite/lite-addon-shell/internal/fakesys"
+	"github.com/openccu-lite/lite-addon-shell/internal/files"
 	"github.com/openccu-lite/lite-addon-shell/internal/httpapi"
 	"github.com/openccu-lite/lite-addon-shell/internal/sessions"
 	"github.com/openccu-lite/lite-addon-shell/internal/sshc"
@@ -34,10 +35,13 @@ const (
 )
 
 type env struct {
-	t     *testing.T
-	srv   *httptest.Server
-	sys   *fakesys.Server
-	sshd  *fakesshd.Server
+	t    *testing.T
+	srv  *httptest.Server
+	sys  *fakesys.Server
+	sshd *fakesshd.Server
+	// tree is the fake sshd's file system (a scratch directory seeded like a small system)
+	tree  *fakesshd.Tree
+	root  string
 	mgr   *sessions.Manager
 	core  *core.Core
 	store *config.Store
@@ -56,6 +60,12 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(e.sshd.Kill)
 	dir := t.TempDir()
+	e.root = filepath.Join(dir, "root")
+	if err := fakesshd.Seed(e.root); err != nil {
+		t.Fatal(err)
+	}
+	e.tree = fakesshd.NewTree(e.root)
+	e.sshd.Files = e.tree
 	if err := e.sshd.WriteHostKey(filepath.Join(dir, "ssh_host_ed25519_key.pub")); err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +83,7 @@ func newEnv(t *testing.T) *env {
 	_ = os.MkdirAll(www, 0o755)
 	_ = os.WriteFile(filepath.Join(www, "index.html"), []byte("<!doctype html><title>Shell</title>"), 0o644)
 	_ = os.WriteFile(filepath.Join(www, "terminal.html"), []byte("<!doctype html><title>Shell (root)</title>"), 0o644)
+	_ = os.WriteFile(filepath.Join(www, "files.html"), []byte("<!doctype html><title>Shell (root)</title>"), 0o644)
 	ssh := &sshc.Client{Addr: e.sshd.Addr(), User: "root", HostKeyGlobs: []string{filepath.Join(dir, "ssh_host_*_key.pub")}, Timeout: 5 * time.Second}
 	sys := &system.Client{Base: sysSrv.URL}
 	e.audit = &audit.Log{}
@@ -90,6 +101,13 @@ func newEnv(t *testing.T) *env {
 			}
 			return sh, nil
 		},
+		OpenFiles: func(ctx context.Context, pw string) (sessions.Conn, error) {
+			f, err := files.Open(ctx, ssh, pw, t.Logf)
+			if err != nil {
+				return nil, err
+			}
+			return f, nil
+		},
 		Limits: func() sessions.Limits {
 			s := e.store.Settings()
 			return sessions.Limits{Idle: s.Idle(), Longest: s.Longest(), MaxSessions: s.MaxSessions}
@@ -103,7 +121,7 @@ func newEnv(t *testing.T) *env {
 	ch := addonkit.NewChecker(addonkit.SessionOptions{Base: sysSrv.URL, Need: addonkit.LevelAdmin, CacheTTL: -1,
 		Platform: func() addonkit.Kind { return addonkit.OpenccuLite }})
 	h, p := httpapi.New(httpapi.Options{BasePath: "/addons/shell", WWW: www, Store: e.store, Core: e.core, Sessions: e.mgr, System: sys,
-		Audit: e.audit, Wrap: ch.Handler, Version: "test", Started: time.Now()})
+		Audit: e.audit, Wrap: ch.Handler, ReadTimeout: 300 * time.Millisecond, Version: "test", Started: time.Now()})
 	ping = p
 	e.srv = httptest.NewServer(h)
 	t.Cleanup(e.srv.Close)
@@ -520,11 +538,11 @@ func TestAttachRules(t *testing.T) {
 	}
 }
 
-// The terminal page refuses framing and foreign scripts; the launcher page stays frameable (the
-// system's shell frames it). The API is never cached.
+// The terminal and the files page refuse framing and foreign scripts; the launcher page stays
+// frameable (the system's shell frames it). The API is never cached.
 func TestPageHeaders(t *testing.T) {
 	e := newEnv(t)
-	for _, p := range []string{"terminal.html", "terminal"} {
+	for _, p := range []string{"terminal.html", "terminal", "files.html", "files"} {
 		code, _, h := e.req("GET", p, sidAdmin, nil, nil)
 		csp := h.Get("Content-Security-Policy")
 		if code != 200 || !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "script-src 'self'") || h.Get("X-Frame-Options") != "DENY" {
@@ -532,6 +550,10 @@ func TestPageHeaders(t *testing.T) {
 		}
 		if strings.Contains(csp, "unsafe-eval") || strings.Contains(strings.Split(csp, "style-src")[0], "unsafe-inline") {
 			t.Errorf("the policy admits inline or evaluated script: %s", csp)
+		}
+		// the editor's workers are the page's own files: no blob:, no other origin
+		if strings.HasPrefix(p, "files") && (!strings.Contains(csp, "worker-src 'self';") || strings.Contains(csp, "blob:")) {
+			t.Errorf("the files page's policy for workers: %s", csp)
 		}
 	}
 	code, _, h := e.req("GET", "", sidAdmin, nil, nil)

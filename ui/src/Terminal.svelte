@@ -14,13 +14,13 @@
     import {ApiError, apiUrl, del, get, post} from './api.js';
     import {clock, countdown, endReason, pasteLines, signInError} from './model.js';
     import type {Session, State} from './model.js';
+    import SignIn from './SignIn.svelte';
 
     const STORE = 'shell.session';
 
     type Phase = 'loading' | 'signin' | 'connecting' | 'open' | 'ended';
     let phase = $state<Phase>('loading');
     let info = $state<State | undefined>();
-    let password = $state('');
     let error = $state('');
     let session = $state<Session | undefined>();
     let ended = $state('');
@@ -29,7 +29,7 @@
     let lastInput = $state(0);
     let idleMs = $state(0);
     let host = $state<HTMLDivElement | undefined>();
-    let passwordField = $state<HTMLInputElement | undefined>();
+    let sheet = $state<SignIn | undefined>();
     let pasting = $state<{text: string; lines: number} | undefined>();
     let pasteAsked = false;
 
@@ -77,15 +77,16 @@
         sessionStorage.removeItem(STORE);
         session = undefined;
         handle = '';
-        password = '';
         phase = 'signin';
+        // emptied now, not after the answer below: the user may be typing by then
+        sheet?.reset();
         try {
             info = await get<State>('api/v1/state');
             skew = info.now - Date.now();
         } catch (e) {
             fail(e);
         }
-        queueMicrotask(() => passwordField?.focus());
+        sheet?.focus();
     }
 
     function fail(e: unknown) {
@@ -94,23 +95,20 @@
         error = t(m.key, m.values);
     }
 
-    async function connect(ev: Event) {
-        ev.preventDefault();
-        if (!password || phase === 'connecting') return;
+    async function connect(password: string) {
+        if (phase === 'connecting') return;
         error = '';
         phase = 'connecting';
         try {
-            const r = await post<{session: Session; handle: string; now: number}>('api/v1/sessions', {password, cols: 80, rows: 24});
-            password = '';
+            const r = await post<{session: Session; handle: string; now: number}>('api/v1/sessions', {kind: 'terminal', password, cols: 80, rows: 24});
             handle = r.handle;
             skew = r.now - Date.now();
             sessionStorage.setItem(STORE, JSON.stringify({id: r.session.id, handle}));
             attach(r.session.id, false);
         } catch (e) {
-            password = '';
             phase = 'signin';
             fail(e);
-            queueMicrotask(() => passwordField?.focus());
+            sheet?.reset();
         }
     }
 
@@ -269,29 +267,11 @@
 
 <div class="sh-term-page" lang={i18n.language}>
     {#if phase === 'signin' || phase === 'connecting' || phase === 'loading'}
-        <main class="sh-sheet-wrap">
-            <form class="sh-sheet" onsubmit={connect} data-testid="signin" autocomplete="off">
-                <h1>{t('Shell (root)')}</h1>
-                <p>{t('You are opening a root shell on the system. Every session is written to the system\'s log; what you type is not.')}</p>
-                <div class="sh-form sh-form-sheet">
-                    <span class="sh-label">{t('Signed in to the system as')}</span>
-                    <span class="sh-cut sh-strong" title={info?.user ?? ''} data-testid="account">{info?.user ?? ' '}</span>
-                    <label for="pw">{t('root\'s password')}</label>
-                    <input id="pw" class="hmm-input" type="password" autocomplete="off" bind:value={password} bind:this={passwordField} disabled={phase !== 'signin'} data-testid="password" />
-                </div>
-                <!-- the error's place is reserved: the sheet keeps its size -->
-                <p class="sh-error" role="alert" data-testid="error">{error}</p>
-                <div class="sh-actions">
-                    <a class="sh-muted sh-small" href="./">{t('To the addon\'s page')}</a>
-                    <span class="sh-spacer"></span>
-                    <button class="hmm-button sh-wide sh-primary" type="submit" disabled={phase !== 'signin' || !password} data-testid="connect">{phase === 'connecting' ? t('Connecting…') : t('Connect')}</button>
-                </div>
-                <p class="sh-muted sh-small">{t('The password is asked for every session and is stored nowhere.')}</p>
-            </form>
-        </main>
+        <SignIn bind:this={sheet} kind="terminal" user={info?.user ?? ''} busy={phase === 'connecting'} ready={phase !== 'loading'} {error} onconnect={connect} />
     {:else}
         <header class={'sh-bar ' + (phase === 'ended' ? 'ended' : 'live')} data-testid="bar">
             <strong class="sh-bar-title">{t('Shell (root)')}</strong>
+            <span class="sh-bar-kind" data-testid="bar-kind">{t('Terminal')}</span>
             {#if session}
                 <span class="sh-cut sh-bar-item" title={session.user} data-testid="bar-user">{session.user}</span>
                 <span class="sh-cut sh-bar-item sh-mono" title={session.client}>{t('from {client}', {client: session.client})}</span>

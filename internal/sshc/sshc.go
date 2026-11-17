@@ -238,9 +238,9 @@ func (s Size) clamp() Size {
 	return Size{Cols: c(s.Cols, 10, 500, 80), Rows: c(s.Rows, 2, 300, 24)}
 }
 
-// Open signs in with the password and starts the account's shell on a pty. The errors are ErrOff,
-// ErrKeysOnly, ErrWrongPassword, ErrHostKey, or what the connection said.
-func (c *Client) Open(ctx context.Context, password string, size Size) (*Shell, error) {
+// login signs in with the password and answers the connection. The errors are ErrOff, ErrKeysOnly,
+// ErrWrongPassword, ErrHostKey, or what the connection said.
+func (c *Client) login(ctx context.Context, password string) (*ssh.Client, error) {
 	offered := false
 	cfg, err := c.config([]ssh.AuthMethod{ssh.PasswordCallback(func() (string, error) {
 		offered = true
@@ -269,7 +269,34 @@ func (c *Client) Open(ctx context.Context, password string, size Size) (*Shell, 
 		return nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
-	client := ssh.NewClient(cc, chans, reqs)
+	return ssh.NewClient(cc, chans, reqs), nil
+}
+
+// keepalive notices an sshd that went away: the connection is one session's alone. It runs until
+// done is closed and calls lost when a request is not answered.
+func keepalive(client *ssh.Client, done <-chan struct{}, lost func()) {
+	t := time.NewTicker(20 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				lost()
+				return
+			}
+		}
+	}
+}
+
+// Open signs in with the password and starts the account's shell on a pty. The errors are ErrOff,
+// ErrKeysOnly, ErrWrongPassword, ErrHostKey, or what the connection said.
+func (c *Client) Open(ctx context.Context, password string, size Size) (*Shell, error) {
+	client, err := c.login(ctx, password)
+	if err != nil {
+		return nil, err
+	}
 	sess, err := client.NewSession()
 	if err != nil {
 		client.Close()
@@ -300,22 +327,7 @@ func (c *Client) Open(ctx context.Context, password string, size Size) (*Shell, 
 		sh.err = sess.Wait()
 		close(sh.done)
 	}()
-	// the connection is the session's alone: a keepalive notices an sshd that went away
-	go func() {
-		t := time.NewTicker(20 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-sh.done:
-				return
-			case <-t.C:
-				if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
-					sh.Close()
-					return
-				}
-			}
-		}
-	}()
+	go keepalive(client, sh.done, sh.Close)
 	return sh, nil
 }
 

@@ -1,18 +1,23 @@
 // Package sshd tests the addon end to end against a real OpenSSH sshd in docker
 // (test/sshd/Dockerfile): the daemon's whole path - the API behind the kit's session check, the
-// terminal's WebSocket, the SSH client - with a real root shell on a real pty at the other end.
+// terminal's WebSocket, the SSH client - with a real root shell on a real pty at the other end,
+// and the file API with OpenSSH's own SFTP server, as root, on a real kernel's mounts: a
+// read-only one, a full one, and a bind-mounted file that cannot be replaced by a rename.
 // Run with SHELL_DOCKER=1 (CI does; without it the test is skipped).
 package sshd
 
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +33,7 @@ import (
 	"github.com/openccu-lite/lite-addon-shell/internal/config"
 	"github.com/openccu-lite/lite-addon-shell/internal/core"
 	"github.com/openccu-lite/lite-addon-shell/internal/fakesys"
+	"github.com/openccu-lite/lite-addon-shell/internal/files"
 	"github.com/openccu-lite/lite-addon-shell/internal/httpapi"
 	"github.com/openccu-lite/lite-addon-shell/internal/sessions"
 	"github.com/openccu-lite/lite-addon-shell/internal/sshc"
@@ -80,6 +86,13 @@ func newStack(t *testing.T, addr, hostKeyDir string) *stack {
 			}
 			return sh, nil
 		},
+		OpenFiles: func(ctx context.Context, pw string) (sessions.Conn, error) {
+			f, err := files.Open(ctx, s.ssh, pw, t.Logf)
+			if err != nil {
+				return nil, err
+			}
+			return f, nil
+		},
 		Limits: func() sessions.Limits {
 			c := store.Settings()
 			return sessions.Limits{Idle: c.Idle(), Longest: c.Longest(), MaxSessions: c.MaxSessions}
@@ -119,6 +132,36 @@ func (s *stack) req(method, path string, body any) (int, map[string]any) {
 	var out map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&out)
 	return res.StatusCode, out
+}
+
+// fs is a request for a files session's files, as the gate hands it on, with the handle in its
+// header; body is sent as it is. It answers the status, the body and the headers.
+func (s *stack) fs(method, id, handle, call string, body []byte, hdr map[string]string) (int, []byte, http.Header) {
+	s.t.Helper()
+	r, _ := http.NewRequest(method, s.srv.URL+"/addons/shell/api/v1/sessions/"+id+"/fs/"+call, bytes.NewReader(body))
+	r.Header.Set("X-Forwarded-For", "192.0.2.10")
+	r.Header.Set("X-Forwarded-Proto", "https")
+	r.Header.Set("X-Occulite-Session", sid)
+	r.Header.Set("X-Occulite-Auth", "session")
+	r.Header.Set("X-CCU-Addon-Request", "1")
+	if handle != "" {
+		r.Header.Set(httpapi.HandleHeader, handle)
+	}
+	for k, v := range hdr {
+		r.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return res.StatusCode, b, res.Header
+}
+
+func sha(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
 }
 
 type term struct {
@@ -222,7 +265,8 @@ func TestAgainstRealSSHD(t *testing.T) {
 	}
 	run(t, "docker", "build", "-q", "-t", image, ".")
 	name := fmt.Sprintf("lite-addon-shell-sshd-%d", time.Now().UnixNano())
-	run(t, "docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1:0:22", image)
+	// /ro is a read-only mount and /full a file system of 256 KiB, for the file API
+	run(t, "docker", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1:0:22", "--tmpfs", "/ro:ro", "--tmpfs", "/full:size=256k", image)
 	t.Cleanup(func() {
 		if t.Failed() {
 			out, _ := exec.Command("docker", "logs", name).CombinedOutput()
@@ -338,6 +382,198 @@ func TestAgainstRealSSHD(t *testing.T) {
 			t.Errorf("%d lines arrived", got)
 		}
 		s.mgr.End(id, sessions.ReasonEnded)
+	})
+
+	t.Run("root's files over OpenSSH's SFTP server: a save keeps mode and owner, backs up, and knows the mounts", func(t *testing.T) {
+		sh := func(cmd string) string { return run(t, "docker", "exec", name, "sh", "-c", cmd) }
+		code, out := s.req("POST", "api/v1/sessions", map[string]any{"kind": "files", "password": password})
+		if code != 201 {
+			t.Fatalf("sign-in: %d %v", code, out)
+		}
+		id, handle := out["session"].(map[string]any)["id"].(string), out["handle"].(string)
+		defer s.mgr.End(id, sessions.ReasonEnded)
+		q := func(p string) string { return "path=" + url.QueryEscape(p) }
+		js := func(method, call string, body any) (int, map[string]any) {
+			t.Helper()
+			var b []byte
+			hdr := map[string]string{}
+			if body != nil {
+				b, _ = json.Marshal(body)
+				hdr["Content-Type"] = "application/json"
+			}
+			st, raw, _ := s.fs(method, id, handle, call, b, hdr)
+			var out map[string]any
+			_ = json.Unmarshal(raw, &out)
+			return st, out
+		}
+		read := func(p string) (int, []byte, map[string]any) {
+			t.Helper()
+			st, body, h := s.fs("GET", id, handle, "read?"+q(p), nil, nil)
+			var meta map[string]any
+			_ = json.Unmarshal([]byte(h.Get(httpapi.MetaHeader)), &meta)
+			return st, body, meta
+		}
+		save := func(p, content, replaces string) (int, map[string]any) {
+			t.Helper()
+			st, raw, _ := s.fs("PUT", id, handle, "write?"+q(p), []byte(content), map[string]string{"If-Match": `"` + replaces + `"`})
+			var out map[string]any
+			_ = json.Unmarshal(raw, &out)
+			return st, out
+		}
+
+		// the root directory as sshd's own SFTP server lists it, with the names of the accounts
+		st, list := js("GET", "list?"+q("/"), nil)
+		if st != 200 || list["writable"] != true {
+			t.Fatalf("list /: %d %v", st, list)
+		}
+		names := map[string]map[string]any{}
+		for _, e := range list["entries"].([]any) {
+			names[e.(map[string]any)["name"].(string)] = e.(map[string]any)
+		}
+		if names["etc"]["type"] != "dir" || names["etc"]["owner"] != "root" || names["proc"]["locked"] != "kernel" || names["ro"]["locked"] != "read-only" || names["full"]["locked"] != nil {
+			t.Fatalf("the root directory: etc %v, proc %v, ro %v, full %v", names["etc"], names["proc"], names["ro"], names["full"])
+		}
+
+		// a file of another account, closed to others
+		sh("mkdir -p /usr/local/etc/config && printf 'Listen Port = 32001\\n' > /usr/local/etc/config/rfd.conf && chown nobody:nobody /usr/local/etc/config/rfd.conf && chmod 0640 /usr/local/etc/config/rfd.conf && ln -s /usr/local/etc/config /etc/config")
+		conf := "/usr/local/etc/config/rfd.conf"
+		st, body, meta := read("/etc/config/rfd.conf")
+		if st != 200 || string(body) != "Listen Port = 32001\n" || meta["real"] != conf || meta["owner"] != "nobody" || meta["mode"] != "0640" || meta["editable"] != true || meta["sha256"] != sha(body) {
+			t.Fatalf("read: %d %q %v", st, body, meta)
+		}
+		st, saved := save(conf, "Listen Port = 32002\n", sha(body))
+		if st != 200 || saved["in_place"] != false {
+			t.Fatalf("save: %d %v", st, saved)
+		}
+		if got := sh("stat -c '%U:%G %a' " + conf + "; cat " + conf); got != "nobody:nobody 640\nListen Port = 32002" {
+			t.Fatalf("after the save: %q", got)
+		}
+		// the backup is root's and closed, in closed directories, with the mark that keeps it out of a system backup
+		backup := saved["backup"].(string)
+		if got := sh("stat -c '%U %a' " + backup + " /usr/local/shell-backups /usr/local/shell-backups/usr/local/etc/config /usr/local/shell-backups/.nobackup; cat " + backup); got != "root 600\nroot 700\nroot 700\nroot 600\nListen Port = 32001" {
+			t.Fatalf("the backup: %q", got)
+		}
+		if left := sh("ls -a /usr/local/etc/config | grep -c shell- || true"); left != "0" {
+			t.Fatalf("a temporary file stayed beside the file")
+		}
+		// changed by someone else in between: a conflict, and nothing is written
+		sh("echo theirs > " + conf)
+		if st, out := save(conf, "mine\n", saved["sha256"].(string)); st != 409 || out["error"] != "conflict" || out["sha256"] != sha([]byte("theirs\n")) {
+			t.Fatalf("conflict: %d %v", st, out)
+		}
+		if got := sh("cat " + conf); got != "theirs" {
+			t.Fatalf("a conflict wrote: %q", got)
+		}
+
+		// /etc/hosts is a bind mount in a container, as the writable passwd is on a system: no rename over it
+		st, body, meta = read("/etc/hosts")
+		if st != 200 || meta["editable"] != true {
+			t.Fatalf("read /etc/hosts: %d %v", st, meta)
+		}
+		st, saved = save("/etc/hosts", string(body)+"127.0.0.2 in-place\n", sha(body))
+		if st != 200 || saved["in_place"] != true {
+			t.Fatalf("save /etc/hosts: %d %v", st, saved)
+		}
+		if got := sh("tail -n 1 /etc/hosts; ls -a /etc | grep -c shell- || true"); got != "127.0.0.2 in-place\n0" {
+			t.Fatalf("after the save in place: %q", got)
+		}
+
+		// the kernel's files: read to the end though they state no size, never editable; a device is not opened
+		if st, body, meta = read("/proc/version"); st != 200 || !strings.HasPrefix(string(body), "Linux version") || meta["editable"] != false || meta["why"] != "kernel" {
+			t.Fatalf("/proc/version: %d %q %v", st, body, meta)
+		}
+		if st, _, _ := read("/dev/zero"); st != 422 {
+			t.Fatalf("/dev/zero: %d", st)
+		}
+		// a read-only mount is known before the system says no
+		if st, out := js("POST", "create", map[string]any{"path": "/ro/new"}); st != 403 || out["error"] != "read-only" {
+			t.Fatalf("create on a read-only mount: %d %v", st, out)
+		}
+		if st, out := js("GET", "list?"+q("/ro"), nil); st != 200 || out["writable"] != false || out["reason"] != "read-only" || out["mount"] != "/ro" {
+			t.Fatalf("list /ro: %d %v", st, out)
+		}
+
+		// upload and download: three megabytes, streamed both ways, the same bytes
+		big := bytes.Repeat([]byte("0123456789abcdef\x00\xff"), 3<<20/18)
+		if st, raw, _ := s.fs("POST", id, handle, "upload?"+q("/usr/local/up.bin"), big, nil); st != 201 {
+			t.Fatalf("upload: %d %s", st, raw)
+		}
+		if got := sh("sha256sum /usr/local/up.bin | cut -d' ' -f1; stat -c '%U %a' /usr/local/up.bin"); got != sha(big)+"\nroot 644" {
+			t.Fatalf("the upload on the system: %q", got)
+		}
+		st, tk := js("POST", "download", map[string]any{"path": "/usr/local/up.bin"})
+		if st != 201 {
+			t.Fatalf("ticket: %d %v", st, tk)
+		}
+		st, got, h := s.fs("GET", id, "", "download/"+tk["ticket"].(string), nil, nil)
+		if st != 200 || sha(got) != sha(big) || !strings.Contains(h.Get("Content-Disposition"), "up.bin") {
+			t.Fatalf("download: %d, %d bytes", st, len(got))
+		}
+		// a full file system: the upload is refused with the reason and leaves nothing; a save there leaves the file alone
+		if st, raw, _ := s.fs("POST", id, handle, "upload?"+q("/full/big.bin"), big, nil); st != 507 || !strings.Contains(string(raw), "no-space") {
+			t.Fatalf("upload to a full file system: %d %s", st, raw)
+		}
+		if got := sh("ls -a /full | grep -vc '^\\.\\.\\?$' || true"); got != "0" {
+			t.Fatalf("a part of the upload stayed: %s", sh("ls -la /full"))
+		}
+		sh("printf 'small\\n' > /full/f.conf; dd if=/dev/zero of=/full/fill bs=1k count=300 2>/dev/null || true")
+		// (the backup goes to /usr/local, which has room: it is the write beside the file that fails)
+		if st, out := save("/full/f.conf", strings.Repeat("larger than what is left\n", 2000), sha([]byte("small\n"))); st != 507 || out["error"] != "no-space" {
+			t.Fatalf("save on a full file system: %d %v", st, out)
+		}
+		if got := sh("cat /full/f.conf; ls -a /full | grep -c shell- || true"); got != "small\n0" {
+			t.Fatalf("after the refused save: %q", got)
+		}
+
+		// mode and owner, rename, a folder with everything in it
+		if st, out := js("POST", "chmod", map[string]any{"path": "/usr/local/up.bin", "mode": "4750"}); st != 200 {
+			t.Fatalf("chmod: %d %v", st, out)
+		}
+		if st, out := js("POST", "chown", map[string]any{"path": "/usr/local/up.bin", "uid": 65534, "gid": 0}); st != 200 {
+			t.Fatalf("chown: %d %v", st, out)
+		}
+		// (the kernel clears the set-id bit at a change of owner: the page sets the owner first for that reason)
+		if got := sh("stat -c '%U:%G %a' /usr/local/up.bin"); got != "nobody:root 750" {
+			t.Fatalf("after chmod and chown: %q", got)
+		}
+		if st, out := js("POST", "mkdir", map[string]any{"path": "/usr/local/dir"}); st != 201 {
+			t.Fatalf("mkdir: %d %v", st, out)
+		}
+		if st, out := js("POST", "rename", map[string]any{"from": "/usr/local/up.bin", "to": "/usr/local/dir/moved.bin"}); st != 200 {
+			t.Fatalf("rename: %d %v", st, out)
+		}
+		if st, out := js("POST", "rename", map[string]any{"from": conf, "to": "/usr/local/dir/moved.bin"}); st != 409 || out["error"] != "exists" {
+			t.Fatalf("rename over a file: %d %v", st, out)
+		}
+		sh("ln -s /etc /usr/local/dir/to-etc && mkdir -p /usr/local/dir/a/b && touch /usr/local/dir/a/b/c")
+		if st, out := js("POST", "remove", map[string]any{"path": "/usr/local/dir"}); st != 409 || out["error"] != "not-empty" || out["entries"] != float64(3) {
+			t.Fatalf("remove a folder with something in it: %d %v", st, out)
+		}
+		if st, out := js("POST", "remove", map[string]any{"path": "/usr/local/dir", "recursive": true}); st != 200 || out["removed"] != float64(6) {
+			t.Fatalf("remove with everything: %d %v", st, out)
+		}
+		if got := sh("test -e /usr/local/dir && echo there; test -f /etc/passwd && echo passwd"); got != "passwd" {
+			t.Fatalf("after the delete: %q", got)
+		}
+		// restore the first version; the present one is kept
+		_, bl := js("GET", "backups?"+q(conf), nil)
+		list2 := bl["backups"].([]any)
+		oldest := list2[len(list2)-1].(map[string]any)["name"].(string)
+		if st, out := js("POST", "restore", map[string]any{"path": conf, "name": oldest}); st != 200 {
+			t.Fatalf("restore: %d %v", st, out)
+		}
+		if got := sh("cat " + conf + "; stat -c '%U:%G %a' " + conf); got != "Listen Port = 32001\nnobody:nobody 640" {
+			t.Fatalf("after the restore: %q", got)
+		}
+		lines, _ := json.Marshal(s.audit.List())
+		for _, want := range []string{"session-open kind=files user=admin", `file-write id=` + id + ` user=admin path=\"` + conf + `\" bytes=20`, `path=\"/etc/hosts\"`, "in_place=true", "file-upload id=" + id, "file-download id=" + id, "file-restore id=" + id} {
+			if !strings.Contains(string(lines), want) {
+				t.Errorf("audit lacks %q", want)
+			}
+		}
+		if strings.Contains(string(lines), "32002") || strings.Contains(string(lines), "theirs") {
+			t.Errorf("the audit holds what a file holds")
+		}
 	})
 
 	t.Run("keys only: the probe says so and root's password is not even tried", func(t *testing.T) {

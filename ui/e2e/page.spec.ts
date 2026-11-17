@@ -281,12 +281,12 @@ test('the shell\'s own exit ends the session', async ({page}) => {
 test('signed out of the system: the root shell ends with the web session', async ({page}) => {
     await ensureOn(page);
     await openShell(page);
+    // the watch asks about the open session's web session, in the way that does not touch it
+    const peeked = async () => ((await (await page.request.get(`${FAKE}/dev/asks`)).json()).peeked[SID] as number | undefined) ?? 0;
+    await expect.poll(peeked, {timeout: 8000}).toBeGreaterThan(0);
     await dev(page, `/dev/session?sid=${SID}&level=none`);
     try {
         await expect(page.getByTestId('bar-state')).toHaveText('Session ended: Your sign-in to the system ended.', {timeout: 8000});
-        // and the watch asked without touching the web session
-        const asks = await (await page.request.get(`${FAKE}/dev/asks`)).json();
-        expect(asks.peeked[SID]).toBeGreaterThan(0);
         // a new sign-in is refused while the web session is gone
         await page.getByTestId('again').click();
         await page.getByTestId('password').fill('root-pass');

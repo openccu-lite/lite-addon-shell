@@ -7,6 +7,7 @@ export interface Settings {
     max_hours: number;
     max_sessions: number;
     allow_tunnel: boolean;
+    files_read_only: boolean;
 }
 
 export interface Session {
@@ -126,7 +127,7 @@ export function countdown(ms: number): string {
 }
 
 /** The end reasons the backend names; an unknown one reads as a lost connection. */
-export const END_REASONS = ['exit', 'idle', 'max', 'signed-out', 'ended', 'addon-off', 'ssh-off', 'tab-closed', 'connection', 'stopping', 'unverified', 'replaced', 'lost'] as const;
+export const END_REASONS = ['exit', 'idle', 'max', 'signed-out', 'ended', 'addon-off', 'ssh-off', 'tab-closed', 'connection', 'stopping', 'unverified', 'stuck', 'replaced', 'lost'] as const;
 
 export function endReason(reason: string): string {
     return 'end.' + ((END_REASONS as readonly string[]).includes(reason) ? reason : 'lost');
@@ -185,5 +186,5 @@ export function settingsValid(s: Settings, b: {min: Settings; max: Settings}): b
 }
 
 export function settingsEqual(a: Settings, b: Settings): boolean {
-    return a.idle_minutes === b.idle_minutes && a.max_hours === b.max_hours && a.max_sessions === b.max_sessions && a.allow_tunnel === b.allow_tunnel;
+    return a.idle_minutes === b.idle_minutes && a.max_hours === b.max_hours && a.max_sessions === b.max_sessions && a.allow_tunnel === b.allow_tunnel && a.files_read_only === b.files_read_only;
 }
