@@ -325,6 +325,36 @@ test('SSH off or keys only: the page says what to do, and open sessions end with
     }).toPass({timeout: 8000});
 });
 
+test('the SSH server makes the system wait after failed sign-ins: the page says that, not "unknown"', async ({page}) => {
+    await ensureOn(page);
+    const pill = await box(page.getByTestId('pill-ssh'));
+    await dev(page, '/dev/sshd?mode=refusing');
+    try {
+        // the page learns it from the sign-in that runs into it: no reload
+        const res = await page.request.post('api/v1/sessions', {headers: {'X-CCU-Addon-Request': '1'}, data: {password: 'root-pass'}});
+        expect(res.status()).toBe(503);
+        expect((await res.json()).error).toBe('ssh-refusing');
+        await expect(page.getByTestId('pill-ssh')).toHaveText('Not now');
+        expect(await box(page.getByTestId('pill-ssh'))).toEqual(pill);
+        await expect(page.getByTestId('hint')).toContainText('The SSH server takes no sign-in from the system for a moment');
+        await expect(page.getByTestId('open')).toBeDisabled();
+        // the sign-in sheet says the same, and it is no wrong password
+        await page.goto('./terminal');
+        await page.getByTestId('password').fill('root-pass');
+        await page.getByTestId('connect').click();
+        await expect(page.getByTestId('error')).toHaveText('The SSH server takes no sign-in from the system for a moment: after several failed sign-ins it makes everyone wait. Try again in a minute.');
+        // German
+        await german(page);
+        await page.goto('./');
+        await expect(page.getByTestId('pill-ssh')).toHaveText('Gerade nicht');
+        expect(await box(page.getByTestId('pill-ssh'))).toEqual(pill);
+    } finally {
+        await dev(page, '/dev/sshd?mode=on');
+    }
+    // it passes by itself, and the page sees that without a reload
+    await expect(page.getByTestId('pill-ssh')).toHaveText('Ein', {timeout: 25_000});
+});
+
 test('a closed tab: the session ends after the grace', async ({page, context}) => {
     await ensureOn(page);
     const term = await context.newPage();

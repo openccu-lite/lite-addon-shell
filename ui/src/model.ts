@@ -23,7 +23,7 @@ export interface Session {
     mine: boolean;
 }
 
-export type SSHState = 'on' | 'off' | 'keys-only' | 'unknown';
+export type SSHState = 'on' | 'off' | 'keys-only' | 'refusing' | 'unknown';
 export type Transport = 'https' | 'http' | 'tunnel';
 
 export interface State {
@@ -74,6 +74,9 @@ export function clock(at: number, now: number, language?: string): string {
     return d.toLocaleDateString(locale, {day: '2-digit', month: '2-digit'}) + ' ' + time;
 }
 
+/** What the pages say while the SSH server makes the system wait after failed sign-ins. */
+export const REFUSING = 'The SSH server takes no sign-in from the system for a moment: after several failed sign-ins it makes everyone wait. Try again in a minute.';
+
 /** The addon's pill: a root shell that is on is a caution, never the ok colour. */
 export function addonPill(s: Pick<State, 'enabled' | 'until' | 'now'>, locale?: string): Pill {
     if (!s.enabled) return {label: 'Off', tone: 'idle'};
@@ -89,6 +92,8 @@ export function sshPill(ssh: SSHState): Pill {
             return {label: 'Off', tone: 'bad'};
         case 'keys-only':
             return {label: 'Keys only', tone: 'bad'};
+        case 'refusing':
+            return {label: 'Not now', tone: 'bad'};
         default:
             return {label: 'Unknown', tone: 'bad'};
     }
@@ -111,6 +116,7 @@ export function blockReason(s: Pick<State, 'enabled' | 'ssh' | 'blocked' | 'auth
     if (s.blocked === 'tunnel-refused') return 'The shell is not offered through a tunnel addon. An administrator can allow it in the settings below.';
     if (s.ssh === 'off') return 'SSH is switched off. Switch it on under System → Remote access.';
     if (s.ssh === 'keys-only') return 'SSH accepts keys only, so root\'s password does not work. Allow password login under System → Remote access.';
+    if (s.ssh === 'refusing') return REFUSING;
     if (s.ssh === 'unknown') return 'The SSH server did not answer as the system\'s own. The shell stays closed.';
     if (s.sessions.length >= s.settings.max_sessions) return 'Too many sessions are open. End one first.';
     return '';
@@ -155,6 +161,8 @@ export function signInError(code: string, body: {tries_left?: number; until?: nu
             return {key: 'The shell is not offered through a tunnel addon. An administrator can allow it in the settings below.'};
         case 'auth-off':
             return {key: 'The system runs without a login: every visitor would be an administrator. The shell stays off.'};
+        case 'ssh-refusing':
+            return {key: REFUSING};
         case 'host-key':
             return {key: 'The SSH server did not answer as the system\'s own. The shell stays closed.'};
         case 'forbidden':

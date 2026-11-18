@@ -65,7 +65,11 @@ vor dem Einschalten nach und schaltet sich selbst wieder aus.
   Ausgaben sind keine Eingabe: Ein laufendes `tail -f` hält keine Root-Shell offen. Auf der Dateiseite ist jede
   Aktion (einen Ordner öffnen, speichern) eine Eingabe. Terminals und Dateisitzungen zählen gegen dieselbe Grenze.
   Fünf falsche Passwörter eines
-  Kontos oder von einer Adresse sperren die Anmeldung für 15 Minuten; die Grenzen des SSH-Servers gelten zusätzlich.
+  Kontos oder von einer Adresse sperren die Anmeldung für 15 Minuten. **Der SSH-Server hat eine eigene Grenze**:
+  Nach etwa drei Fehlversuchen von einer Adresse nimmt er von dieser Adresse eine Weile keine Verbindung mehr an
+  (zuerst 15 Sekunden, mit jedem weiteren Fehlversuch länger) - und über das Addon ist diese Adresse das System
+  selbst, es warten also alle, die sich hier anmelden, auch mit dem richtigen Passwort. Die Seiten sagen das
+  (*SSH: Gerade nicht*) und schauen von selbst wieder nach.
 - **Nur für Administratoren, mit ihrer Web-Sitzung.** Ein API-Token wird abgewiesen, gleich mit welchem Recht: Eine
   Root-Shell ist für einen Menschen, nicht für ein Programm. Läuft das System ohne Anmeldung, lässt sich das Addon
   nicht einschalten.
@@ -208,7 +212,7 @@ go test ./...                                   # die Units, gegen einen SSH- un
 SHELL_DOCKER=1 go test -count=1 ./test/sshd/     # Ende zu Ende gegen einen echten OpenSSH-sshd in docker
 (cd ui && npm ci && npm run check && npm test && npm run build)
 (cd ui && npx playwright install chromium && npx playwright test)   # die Seiten gegen scripts/dev-serve.sh
-VERSION=0.2.0 scripts/build.sh                  # dist/shell-<arch>-<version>.tar.gz
+VERSION=0.2.1 scripts/build.sh                  # dist/shell-<arch>-<version>.tar.gz
 ```
 
 `scripts/dev-serve.sh` startet den Dienst gegen einen Stellvertreter des Systems und einen SSH-Server, der das echte

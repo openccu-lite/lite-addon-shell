@@ -1,7 +1,7 @@
 // fakesystem runs the fake openccu-lite and a fake sshd for the page's development and the
 // Playwright tests (scripts/dev-serve.sh): the system on -addr (the web session of the daemon's
 // development mode is an administrator's), sshd on -sshd with root's password -password and its
-// public host key written to -host-key. /dev/sshd?mode=on|keys-only|off switches the fake sshd,
+// public host key written to -host-key. /dev/sshd?mode=on|keys-only|refusing|off switches the fake sshd,
 // /dev/session ends or changes the web session; see internal/fakesys. With -files the fake sshd
 // offers SFTP over that directory, seeded like a small system (fakesshd.Seed); /dev/fs/reset seeds
 // it anew, /dev/fs/write?path= and /dev/fs/read?path= change and read a file behind the page's
@@ -85,7 +85,10 @@ func main() {
 	mux.HandleFunc("POST /dev/sshd", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
+		sshd.SetRefusing(false)
 		switch r.URL.Query().Get("mode") {
+		case "refusing":
+			sshd.SetRefusing(true)
 		case "off":
 			sshd.Stop()
 		case "kill":

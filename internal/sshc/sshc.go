@@ -27,6 +27,10 @@ const (
 	StateOn       = "on"        // sshd takes a password
 	StateKeysOnly = "keys-only" // sshd runs and refuses passwords ("Only key login")
 	StateUnknown  = "unknown"   // sshd answered something else (its host key is not the system's)
+	// StateRefusing is sshd dropping every connection from the system for a moment: after a few
+	// failed sign-ins from one address OpenSSH makes that address wait (PerSourcePenalties), and
+	// on the loopback that address is everyone who signs in through the addon.
+	StateRefusing = "refusing"
 )
 
 // Errors of a login.
@@ -35,6 +39,9 @@ var (
 	ErrKeysOnly      = errors.New("SSH accepts keys only")
 	ErrWrongPassword = errors.New("wrong password")
 	ErrHostKey       = errors.New("the SSH server's host key is not the system's")
+	// ErrRefusing is sshd dropping the connection before it says anything: the wait it imposes on
+	// an address after failed sign-ins (StateRefusing), or too many sign-ins at once.
+	ErrRefusing = errors.New("the SSH server takes no sign-in from here for a moment")
 	// ErrKeyRefused is a key the server does not take: no line for it in root's authorized keys,
 	// or a line whose time is up or that is for another address.
 	ErrKeyRefused = errors.New("the SSH server refused the key")
@@ -162,6 +169,13 @@ func (c *Client) Listening() (listening, known bool) {
 	return false, known
 }
 
+// dropped says whether a handshake failed because the server closed the connection without a
+// word: what sshd does to an address it makes wait.
+func dropped(err error) bool {
+	return errors.Is(err, io.EOF) || strings.Contains(err.Error(), "handshake failed: EOF") ||
+		strings.Contains(err.Error(), "connection reset by peer")
+}
+
 var errProbe = errors.New("probe")
 
 // Probe asks sshd what it offers without trying a password: it connects, lets the server list its
@@ -201,6 +215,9 @@ func (c *Client) Probe(ctx context.Context) string {
 	}
 	if strings.Contains(err.Error(), "unable to authenticate") {
 		return StateKeysOnly
+	}
+	if dropped(err) {
+		return StateRefusing
 	}
 	return StateUnknown
 }
@@ -284,6 +301,8 @@ func (c *Client) connect(ctx context.Context, auth ssh.AuthMethod, refused func(
 			return nil, ErrHostKey
 		case strings.Contains(err.Error(), "unable to authenticate"):
 			return nil, refused()
+		case dropped(err):
+			return nil, ErrRefusing
 		}
 		return nil, err
 	}

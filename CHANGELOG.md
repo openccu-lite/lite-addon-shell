@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1] - 2026-11-18
+
+- **After a few wrong passwords the pages called the SSH server "unknown"** and said it had not answered as the
+  system's own - also to the next person, and with the right password. What really happens: the SSH server
+  takes no connection from an address for a while after about three failed sign-ins from it, and through the
+  addon that address is the system itself. The pages say that now (*SSH: Not now*, with the advice to try again
+  in a minute), the sign-in answers `503 ssh-refusing` instead of a connection error, such an attempt is not
+  counted as a wrong password, and the addon's page looks again by itself until the wait is over.
+
 ## [0.2.0] - 2026-11-18
 
 The files page: root's files in the browser, beside the terminal. For openccu-lite 2.0.0-beta.7 and newer, as

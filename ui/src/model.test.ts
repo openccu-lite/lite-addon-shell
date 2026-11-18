@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {addonPill, blockReason, clock, countdown, END_REASONS, endReason, pasteLines, settingsEqual, settingsValid, signInError, sshPill, transportPill, windowLabel} from './model.js';
+import {addonPill, blockReason, clock, countdown, END_REASONS, endReason, pasteLines, REFUSING, settingsEqual, settingsValid, signInError, sshPill, transportPill, windowLabel} from './model.js';
 import type {Settings, State} from './model.js';
 
 const settings: Settings = {idle_minutes: 15, max_hours: 8, max_sessions: 2, allow_tunnel: false, files_read_only: false};
@@ -96,6 +96,7 @@ describe('ends and pastes', () => {
         expect(endReason('idle')).toBe('end.idle');
         expect(endReason('whatever')).toBe('end.lost');
         expect(END_REASONS).toContain('signed-out');
+        expect(END_REASONS).toContain('stuck');
     });
     it('counts the lines of a paste', () => {
         expect(pasteLines('')).toBe(0);
@@ -117,3 +118,13 @@ describe('the settings form', () => {
         expect(settingsEqual(settings, {...settings, files_read_only: true})).toBe(false);
     });
 });
+
+describe('the SSH server makes the system wait after failed sign-ins', () => {
+    it('is neither "off" nor "not the system\'s": a pill and a sentence of its own', () => {
+        expect(sshPill('refusing')).toEqual({label: 'Not now', tone: 'bad'});
+        expect(blockReason({...base, ssh: 'refusing'})).toBe(REFUSING);
+        expect(signInError('ssh-refusing', undefined, base.now).key).toBe(REFUSING);
+        expect(REFUSING).toMatch(/Try again in a minute/);
+    });
+});
+

@@ -6,7 +6,7 @@
     "de": "Eine Root-Shell und die Dateien von root für das System im Browser, für den Fall, dass kein ssh-Client zur Hand ist: ein Terminal und ein Dateibrowser mit Editor, jeweils in einem eigenen Tab. Das Addon selbst ist nie root. Jede Sitzung ist eine SSH-Anmeldung am SSH-Server des Systems mit dem root-Passwort, das jedes Mal abgefragt und nirgends gespeichert wird; SSH muss dafür eingeschaltet sein. Nach der Installation ist das Addon aus; ein Administrator schaltet es für eine begrenzte Zeit ein, und die Statusseite des Systems sagt, solange es ein ist. Nur für Administratoren, nur über HTTPS, mit Zeitlimits für jede Sitzung.",
     "en": "A root shell and root's files for the system in the browser, for when no ssh client is at hand: a terminal, and a file browser with an editor, each in a tab of its own. The addon itself is never root. Each session is an SSH sign-in to the system's own SSH server with root's password, which is asked every time and stored nowhere; SSH has to be switched on for it. The addon is off after the install; an administrator switches it on for a limited time, and the system's Status page says so while it is on. For administrators only, over HTTPS only, with time limits on every session."
   },
-  "version": "0.2.0",
+  "version": "0.2.1",
   "homepage": "https://github.com/openccu-lite/lite-addon-shell",
   "licence": "MIT",
   "changelog": "https://github.com/openccu-lite/lite-addon-shell/blob/main/CHANGELOG.md",

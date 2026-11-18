@@ -494,6 +494,11 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, sshc.ErrKeysOnly):
 		fail(w, http.StatusConflict, "keys-only", "SSH accepts keys only", nil)
 		return
+	case errors.Is(err, sshc.ErrRefusing):
+		// not a wrong password and not counted as one: sshd did not look at it
+		s.o.Core.Saw(sshc.StateRefusing)
+		fail(w, http.StatusServiceUnavailable, "ssh-refusing", err.Error(), nil)
+		return
 	case errors.Is(err, sshc.ErrHostKey):
 		fail(w, http.StatusBadGateway, "host-key", err.Error(), nil)
 		return

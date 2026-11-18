@@ -538,6 +538,34 @@ func TestAttachRules(t *testing.T) {
 	}
 }
 
+// sshd makes the loopback wait after failed sign-ins (OpenSSH's PerSourcePenalties): the state and
+// the sign-in say that, the right password is not counted as a wrong one, and it passes.
+func TestTheSSHServersWaitAfterFailedSignInsIsSaidAsSuch(t *testing.T) {
+	e := newEnv(t)
+	e.enable()
+	e.sshd.SetRefusing(true)
+	// the pages learn it from the sign-in that ran into it, not only at their next look
+	if _, st, _ := e.req("GET", "api/v1/state", sidAdmin, nil, nil); st["ssh"] != "on" {
+		t.Fatalf("state before anyone tried: %v", st["ssh"])
+	}
+	for _, kind := range []string{"terminal", "files"} {
+		code, out, _ := e.req("POST", "api/v1/sessions", sidAdmin, map[string]any{"kind": kind, "password": "root-pass"}, nil)
+		if code != 503 || out["error"] != "ssh-refusing" {
+			t.Fatalf("%s: %d %v", kind, code, out)
+		}
+	}
+	_, st, _ := e.req("GET", "api/v1/state", sidAdmin, nil, nil)
+	if st["ssh"] != "refusing" || st["locked_until"] != nil {
+		t.Fatalf("the state after the refused sign-ins: ssh %v, locked %v", st["ssh"], st["locked_until"])
+	}
+	e.sshd.SetRefusing(false)
+	time.Sleep(2100 * time.Millisecond) // the state's probe is kept for two seconds
+	if _, st, _ := e.req("GET", "api/v1/state", sidAdmin, nil, nil); st["ssh"] != "on" {
+		t.Fatalf("state afterwards: %v", st["ssh"])
+	}
+	e.open(sidAdmin)
+}
+
 // The terminal and the files page refuse framing and foreign scripts; the launcher page stays
 // frameable (the system's shell frames it). The API is never cached.
 func TestPageHeaders(t *testing.T) {

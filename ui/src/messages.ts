@@ -30,6 +30,7 @@ export const MESSAGES: Catalogue = {
     'On': {de: 'Ein', en: 'On'},
     'On until {time}': {de: 'Ein bis {time}', en: 'On until {time}'},
     'Keys only': {de: 'Nur Schlüssel', en: 'Keys only'},
+    'Not now': {de: 'Gerade nicht', en: 'Not now'},
     'Unknown': {de: 'Unbekannt', en: 'Unknown'},
     'HTTPS': {de: 'HTTPS', en: 'HTTPS'},
     'HTTP': {de: 'HTTP', en: 'HTTP'},
@@ -58,6 +59,10 @@ export const MESSAGES: Catalogue = {
     'SSH accepts keys only, so root\'s password does not work. Allow password login under System → Remote access.': {
         de: 'SSH nimmt nur Schlüssel an, das root-Passwort funktioniert deshalb nicht. Erlauben Sie die Anmeldung mit Passwort unter System → Fernzugriff.',
         en: 'SSH accepts keys only, so root\'s password does not work. Allow password login under System → Remote access.',
+    },
+    'The SSH server takes no sign-in from the system for a moment: after several failed sign-ins it makes everyone wait. Try again in a minute.': {
+        de: 'Der SSH-Server nimmt vom System gerade keine Anmeldung an: Nach mehreren Fehlversuchen lässt er alle warten. Versuchen Sie es in einer Minute wieder.',
+        en: 'The SSH server takes no sign-in from the system for a moment: after several failed sign-ins it makes everyone wait. Try again in a minute.',
     },
     'The SSH server did not answer as the system\'s own. The shell stays closed.': {
         de: 'Der SSH-Server hat sich nicht als der des Systems ausgewiesen. Die Shell bleibt geschlossen.',

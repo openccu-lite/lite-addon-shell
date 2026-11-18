@@ -696,6 +696,49 @@ func TestAgainstRealSSHD(t *testing.T) {
 		sh.Close()
 	})
 
+	t.Run("after three wrong passwords sshd makes the address wait: said as such, the right password included", func(t *testing.T) {
+		// OpenSSH's defaults (PerSourcePenalties): on a system the address is the loopback, so the
+		// wait is everyone's who signs in through the addon.
+		reload := func(cmd string) {
+			run(t, "docker", "exec", name, "sh", "-c", cmd+" && kill -HUP 1")
+			time.Sleep(500 * time.Millisecond)
+			for i := 0; i < 50; i++ {
+				if st := s.ssh.Probe(ctx); st == sshc.StateOn {
+					return
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			t.Fatalf("sshd did not come back: %s", s.ssh.Probe(ctx))
+		}
+		reload("echo 'PerSourcePenalties yes' > /etc/ssh/sshd_config.d/penalties.conf")
+		// sshd starts anew at a reload, and the waits it imposed are forgotten with it
+		defer reload("rm -f /etc/ssh/sshd_config.d/penalties.conf")
+		refused := 0
+		for i := 0; i < 5 && refused == 0; i++ {
+			code, out := s.req("POST", "api/v1/sessions", map[string]any{"password": "not-it"})
+			switch {
+			case code == 403 && out["error"] == "wrong-password":
+			case code == 503 && out["error"] == "ssh-refusing":
+				refused = i
+			default:
+				t.Fatalf("attempt %d: %d %v", i, code, out)
+			}
+		}
+		if refused == 0 || refused > 3 {
+			t.Fatalf("sshd began to refuse after %d wrong passwords, want at most three", refused)
+		}
+		if st := s.ssh.Probe(ctx); st != sshc.StateRefusing {
+			t.Fatalf("probe: %s", st)
+		}
+		if code, out := s.req("POST", "api/v1/sessions", map[string]any{"password": password}); code != 503 || out["error"] != "ssh-refusing" {
+			t.Fatalf("the right password during the wait: %d %v", code, out)
+		}
+		time.Sleep(2100 * time.Millisecond) // the state's probe is kept for two seconds
+		if code, out := s.req("GET", "api/v1/state", nil); code != 200 || out["ssh"] != "refusing" {
+			t.Fatalf("state: %d %v", code, out["ssh"])
+		}
+	})
+
 	t.Run("keys only: the probe says so and root's password is not even tried", func(t *testing.T) {
 		run(t, "docker", "exec", name, "sh", "-c", "echo 'PasswordAuthentication no' > /etc/ssh/sshd_config.d/keys.conf && kill -HUP 1")
 		defer func() {

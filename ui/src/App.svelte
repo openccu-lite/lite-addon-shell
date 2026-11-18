@@ -79,6 +79,14 @@
         };
     });
 
+    // the SSH server makes the system wait after failed sign-ins: that passes by itself, so the
+    // page looks again instead of saying it until somebody reloads
+    $effect(() => {
+        if (state_?.ssh !== 'refusing') return;
+        const again = setTimeout(() => void load(), 15_000);
+        return () => clearTimeout(again);
+    });
+
     const serverNow = $derived(now + skew);
     const pills = $derived(
         state_

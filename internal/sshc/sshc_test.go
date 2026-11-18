@@ -274,3 +274,35 @@ func TestAKeySignsInOnlyWhereTheServerHoldsIt(t *testing.T) {
 		t.Fatalf("without sshd: %v", err)
 	}
 }
+
+// After a few failed sign-ins from one address OpenSSH drops every connection from it for a
+// while. That is neither "off" nor "not the system's server": the probe and the sign-in say so.
+func TestAServerThatMakesTheAddressWaitIsToldApart(t *testing.T) {
+	srv, c := start(t)
+	ctx := context.Background()
+	srv.SetRefusing(true)
+	if st := c.Probe(ctx); st != sshc.StateRefusing {
+		t.Fatalf("probe: %s", st)
+	}
+	if _, err := c.Open(ctx, "root-pass", sshc.Size{}); !errors.Is(err, sshc.ErrRefusing) {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := c.OpenFiles(ctx, "root-pass"); !errors.Is(err, sshc.ErrRefusing) {
+		t.Fatalf("files: %v", err)
+	}
+	if _, err := c.OpenWithKey(ctx, newKey(t), sshc.Size{}); !errors.Is(err, sshc.ErrRefusing) {
+		t.Fatalf("with a key: %v", err)
+	}
+	if n := srv.Logins(); n != 0 {
+		t.Fatalf("%d logins", n)
+	}
+	srv.SetRefusing(false)
+	if st := c.Probe(ctx); st != sshc.StateOn {
+		t.Fatalf("probe afterwards: %s", st)
+	}
+	sh, err := c.Open(ctx, "root-pass", sshc.Size{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.Close()
+}

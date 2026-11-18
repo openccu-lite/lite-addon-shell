@@ -59,7 +59,11 @@ switched on, and switches itself off again.
   Output is not input: a running `tail -f` does not keep a root shell open. On the files page every action
   (opening a folder, saving) is input. Terminals and files sessions count against the one limit. Five wrong
   passwords of one account
-  or from one address lock the sign-in for 15 minutes; the SSH server's own limits apply as well.
+  or from one address lock the sign-in for 15 minutes. **The SSH server has a limit of its own**: after about
+  three failed sign-ins from one address it takes no connection from that address for a while (15 seconds at
+  first, longer with every further failure) - and through the addon that address is the system itself, so
+  everyone who signs in here waits, the right password included. The pages say so (*SSH: Not now*) and look
+  again by themselves.
 - **Administrators only, with their web session.** An API token is refused, whatever its scope: a root shell is
   for a person, not a program. While the system runs without a login the addon cannot be switched on.
 - **A session ends with the web session that opened it**: a logout, *sign out everywhere*, a password change, an
@@ -185,10 +189,10 @@ administrator's web session, every write the header `X-CCU-Addon-Request`. Nothi
 | Route | |
 | --- | --- |
 | `GET /health` | `{ok, version, uptime_s}` |
-| `GET /state` | Everything the page shows: `enabled`, `until`, `by`, `ssh` (`on`, `off`, `keys-only`, `unknown`), `transport` (`https`, `http`, `tunnel`), `blocked` (`insecure-transport`, `tunnel-refused` or empty), `auth_off`, `settings`, `bounds`, `windows`, `sessions`, `locked_until` |
+| `GET /state` | Everything the page shows: `enabled`, `until`, `by`, `ssh` (`on`, `off`, `keys-only`, `refusing` - the SSH server makes the system wait after failed sign-ins -, `unknown`), `transport` (`https`, `http`, `tunnel`), `blocked` (`insecure-transport`, `tunnel-refused` or empty), `auth_off`, `settings`, `bounds`, `windows`, `sessions`, `locked_until` |
 | `PUT /enabled` | `{on, hours}`: the switch; `hours` is 1, 8 or 0 (until switched off). `409 auth-off` while the system has no login |
 | `PUT /settings` | `{idle_minutes, max_hours, max_sessions, allow_tunnel, files_read_only}`; `422 invalid` outside the ranges |
-| `POST /sessions` | `{kind, password, cols, rows}`: signs in to the SSH server as root; `kind` is `terminal` (the default) or `files`. `201 {session, handle}`; `409 disabled`, `ssh-off`, `keys-only`, `too-many-sessions {sessions}`, `auth-off`; `403 wrong-password {tries_left}`, `insecure-transport`, `tunnel-refused`; `429 locked {until}`; `502 no-sftp` for files where the SSH server offers no SFTP |
+| `POST /sessions` | `{kind, password, cols, rows}`: signs in to the SSH server as root; `kind` is `terminal` (the default) or `files`. `201 {session, handle}`; `409 disabled`, `ssh-off`, `keys-only`, `too-many-sessions {sessions}`, `auth-off`; `403 wrong-password {tries_left}`, `insecure-transport`, `tunnel-refused`; `429 locked {until}`; `503 ssh-refusing` while the SSH server makes the system wait; `502 no-sftp` for files where the SSH server offers no SFTP |
 | `DELETE /sessions/{id}` | Ends a session: one's own or, as an administrator, anyone's |
 | `DELETE /sessions` | Ends every session: `{ended}` |
 | `GET /sessions/{id}/tty` | The terminal's WebSocket, for the web session that opened the session. The first message is `{handle, cols, rows}`; then binary frames are the terminal's bytes, text frames control messages (`resize`, `ping` from the tab; `ready`, `pong`, `end {reason}` to it). Close codes: 4000 ended (the reason is the close reason), 4001 taken over by another tab, 4003 refused |
@@ -231,7 +235,7 @@ go test ./...                                   # the units, against an SSH and 
 SHELL_DOCKER=1 go test -count=1 ./test/sshd/     # end to end against a real OpenSSH sshd in docker
 (cd ui && npm ci && npm run check && npm test && npm run build)
 (cd ui && npx playwright install chromium && npx playwright test)   # the pages against scripts/dev-serve.sh
-VERSION=0.2.0 scripts/build.sh                  # dist/shell-<arch>-<version>.tar.gz
+VERSION=0.2.1 scripts/build.sh                  # dist/shell-<arch>-<version>.tar.gz
 ```
 
 `scripts/dev-serve.sh` runs the service against a stand-in for the system and an SSH server that speaks the real

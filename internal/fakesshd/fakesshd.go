@@ -35,6 +35,8 @@ type Server struct {
 
 	mu       sync.Mutex
 	keysOnly bool
+	// refusing drops every connection without a word, as sshd does to an address it makes wait
+	refusing bool
 	// authorized is the one key root's authorized keys hold, nil for none
 	authorized ssh.PublicKey
 	l          net.Listener
@@ -69,6 +71,14 @@ func (s *Server) SetKeysOnly(on bool) {
 	s.mu.Unlock()
 }
 
+// SetRefusing makes the server close every new connection before it says anything: OpenSSH's
+// answer to an address with too many failed sign-ins (PerSourcePenalties).
+func (s *Server) SetRefusing(on bool) {
+	s.mu.Lock()
+	s.refusing = on
+	s.mu.Unlock()
+}
+
 // SetAuthorizedKey puts one key into root's authorized keys (nil: none), as the system does for
 // an addon's key that an administrator armed.
 func (s *Server) SetAuthorizedKey(key ssh.PublicKey) {
@@ -100,8 +110,15 @@ func (s *Server) Listen(addr string) error {
 				return
 			}
 			s.mu.Lock()
-			s.conns[c] = true
+			refusing := s.refusing
+			if !refusing {
+				s.conns[c] = true
+			}
 			s.mu.Unlock()
+			if refusing {
+				c.Close()
+				continue
+			}
 			go s.serve(c)
 		}
 	}()

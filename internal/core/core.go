@@ -175,6 +175,18 @@ func (c *Core) SSH(ctx context.Context) string {
 	return c.probe(ctx)
 }
 
+// Saw takes what a sign-in just learned about sshd (it makes the system wait, say), so the pages
+// show it at once instead of what the last look said.
+func (c *Core) Saw(state string) {
+	c.mu.Lock()
+	changed := c.ssh != state
+	c.ssh, c.sshAt = state, c.o.Now()
+	c.mu.Unlock()
+	if changed {
+		c.o.OnChange()
+	}
+}
+
 func (c *Core) probe(ctx context.Context) string {
 	st := sshc.StateUnknown
 	if c.o.Probe != nil {
