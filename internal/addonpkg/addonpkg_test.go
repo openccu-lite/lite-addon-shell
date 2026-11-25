@@ -42,6 +42,7 @@ type manifest struct {
 		Bin          string            `json:"bin"`
 		APIScopes    []string          `json:"api_scopes"`
 		Note         map[string]string `json:"note"`
+		Technical    map[string]string `json:"technical"`
 	} `json:"runtime"`
 }
 
@@ -92,17 +93,27 @@ func TestManifest(t *testing.T) {
 	if m.Release.Asset != "shell-{arch}-{version}.tar.gz" || m.Release.GitHub != "openccu-lite/lite-addon-shell" {
 		t.Errorf("release %+v", m.Release)
 	}
-	if m.Description["de"] == "" || m.Description["en"] == "" || rt.Note["de"] == "" || rt.Note["en"] == "" {
-		t.Error("the description and the note in both languages")
+	if m.Description["de"] == "" || m.Description["en"] == "" || rt.Technical["de"] == "" || rt.Technical["en"] == "" ||
+		rt.Note["de"] == "" || rt.Note["en"] == "" {
+		t.Error("the description, the note and the technical text in both languages")
 	}
-	// the description and the note are the catalogue's texts for users (occulited task 188), no longer the technical account
-	// of scopes, ports and contacts; those are the manifest's keys
-	for _, text := range []string{m.Description["de"], m.Description["en"], rt.Note["de"], rt.Note["en"]} {
+	// the technical text (runtime.technical, occulited task 188) says plainly what the addon is, in both directions
+	for _, want := range []string{"confined", "not root", "does open a root shell", "not stored", "nothing outside the system", "Status page"} {
+		if !strings.Contains(rt.Technical["en"], want) {
+			t.Errorf("the technical text does not say %q", want)
+		}
+	}
+	for _, want := range []string{"SSH has to be switched on", "off after the install", "HTTPS only", "administrators only"} {
+		if !strings.Contains(rt.Technical["en"], want) {
+			t.Errorf("the technical text does not say %q", want)
+		}
+	}
+	for _, text := range []string{m.Description["de"], m.Description["en"], rt.Technical["de"], rt.Note["de"], rt.Technical["en"], rt.Note["en"]} {
 		if regexp.MustCompile(`(?i)\bbox\b`).MatchString(text) {
 			t.Errorf("user-facing text says box: %s", text)
 		}
 	}
-	for _, text := range []string{m.Description["de"], rt.Note["de"]} {
+	for _, text := range []string{m.Description["de"], rt.Technical["de"], rt.Note["de"]} {
 		if regexp.MustCompile(`(?i)\b(du|dein|deine)\b`).MatchString(text) {
 			t.Errorf("German text says du: %s", text)
 		}
