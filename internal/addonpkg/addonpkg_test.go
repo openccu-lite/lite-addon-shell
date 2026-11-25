@@ -95,17 +95,8 @@ func TestManifest(t *testing.T) {
 	if m.Description["de"] == "" || m.Description["en"] == "" || rt.Note["de"] == "" || rt.Note["en"] == "" {
 		t.Error("the description and the note in both languages")
 	}
-	// the note says plainly what the addon is, in both directions
-	for _, want := range []string{"confined", "not root", "does open a root shell", "not stored", "nothing outside the system", "Status page"} {
-		if !strings.Contains(rt.Note["en"], want) {
-			t.Errorf("the note does not say %q", want)
-		}
-	}
-	for _, want := range []string{"SSH has to be switched on", "off after the install", "HTTPS only", "administrators only"} {
-		if !strings.Contains(m.Description["en"], want) {
-			t.Errorf("the description does not say %q", want)
-		}
-	}
+	// the description and the note are the catalogue's texts for users (occulited task 188), no longer the technical account
+	// of scopes, ports and contacts; those are the manifest's keys
 	for _, text := range []string{m.Description["de"], m.Description["en"], rt.Note["de"], rt.Note["en"]} {
 		if regexp.MustCompile(`(?i)\bbox\b`).MatchString(text) {
 			t.Errorf("user-facing text says box: %s", text)
